@@ -1,0 +1,450 @@
+/* NetScope static 3D cyber design system.
+   Main content stays stationary; only decorative layers animate. */
+
+:root {
+  --cyber-bg: #020817;
+  --cyber-bg-secondary: #031128;
+  --cyber-panel: rgba(6, 23, 47, 0.94);
+  --cyber-panel-secondary: rgba(7, 29, 60, 0.92);
+  --cyber-panel-raised: rgba(8, 35, 74, 0.94);
+  --cyber-cyan: #00d9ff;
+  --cyber-cyan-bright: #39efff;
+  --cyber-blue: #138cff;
+  --cyber-green: #20e39a;
+  --cyber-yellow: #ffc928;
+  --cyber-orange: #ff8a24;
+  --cyber-red: #ff435b;
+  --cyber-purple: #a855f7;
+  --cyber-text: #e9f7ff;
+  --cyber-text-secondary: #8daac2;
+  --cyber-text-muted: #55748f;
+  --cyber-border: rgba(0, 217, 255, 0.38);
+  --cyber-border-active: rgba(57, 239, 255, 0.92);
+  --motion-fast: 180ms;
+  --motion-normal: 400ms;
+  --motion-slow: 8s;
+  --motion-very-slow: 16s;
+  --glow-cyan-soft: 0 0 12px rgba(0, 217, 255, 0.12);
+  --glow-cyan-medium: 0 0 20px rgba(0, 217, 255, 0.22);
+  --glow-cyan-strong: 0 0 28px rgba(0, 217, 255, 0.34);
+  --depth-panel:
+    0 18px 45px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(170, 240, 255, 0.12),
+    inset 0 -14px 24px rgba(0, 0, 0, 0.24);
+}
+
+/* Fixed multi-layer background. No content parallax. */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  aria-hidden: true;
+}
+
+body::before {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(0, 217, 255, 0.15), transparent 28%),
+    radial-gradient(circle at 85% 18%, rgba(19, 140, 255, 0.12), transparent 24%),
+    radial-gradient(circle at 70% 82%, rgba(0, 120, 255, 0.08), transparent 30%),
+    linear-gradient(160deg, #020817 0%, #031128 48%, #020713 100%);
+}
+
+body::after {
+  z-index: -1;
+  opacity: 0.42;
+  background-image:
+    linear-gradient(rgba(0, 217, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 217, 255, 0.045) 1px, transparent 1px),
+    repeating-linear-gradient(120deg, transparent 0 34px, rgba(0, 217, 255, 0.018) 35px 36px),
+    radial-gradient(circle at 20% 30%, rgba(57, 239, 255, 0.26) 0 1px, transparent 2px),
+    radial-gradient(circle at 74% 64%, rgba(19, 140, 255, 0.2) 0 1px, transparent 2px),
+    radial-gradient(circle at 58% 18%, rgba(57, 239, 255, 0.18) 0 1px, transparent 2px);
+  background-size: 48px 48px, 48px 48px, 180px 180px, 170px 170px, 210px 210px, 260px 260px;
+  animation: cyber-grid-flow 18s linear infinite;
+}
+
+@keyframes cyber-grid-flow {
+  from { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+  to { background-position: 0 48px, 48px 0, 180px 90px, 0 -170px, 0 -210px, 0 -260px; }
+}
+
+/* One faint scanline across the viewport. */
+.cyber-app::after {
+  content: "";
+  position: fixed;
+  inset-inline: 0;
+  top: -4px;
+  z-index: 60;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(0, 220, 255, 0.28), transparent);
+  filter: blur(0.8px);
+  animation: cyber-scanline-down 10s linear infinite;
+}
+
+@keyframes cyber-scanline-down {
+  from { transform: translateY(-10px); }
+  to { transform: translateY(100vh); }
+}
+
+/* Shared static 3D panel. */
+.cyber-panel {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-color: var(--cyber-border) !important;
+  background:
+    linear-gradient(145deg, rgba(8, 35, 74, 0.92), rgba(6, 23, 47, 0.95) 52%, rgba(2, 8, 23, 0.98)) !important;
+  box-shadow:
+    0 0 0 1px rgba(0, 217, 255, 0.07) inset,
+    var(--glow-cyan-soft),
+    var(--depth-panel) !important;
+  transition:
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    background-color var(--motion-fast) ease;
+}
+
+.cyber-panel:hover {
+  border-color: rgba(57, 239, 255, 0.56) !important;
+  box-shadow:
+    0 0 0 1px rgba(0, 217, 255, 0.1) inset,
+    var(--glow-cyan-medium),
+    var(--depth-panel) !important;
+}
+
+.cyber-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(57, 239, 255, 0.62), transparent 16%) top left / 72px 1px no-repeat,
+    linear-gradient(180deg, rgba(57, 239, 255, 0.62), transparent 18%) top left / 1px 72px no-repeat,
+    linear-gradient(270deg, rgba(19, 140, 255, 0.42), transparent 18%) bottom right / 72px 1px no-repeat,
+    linear-gradient(0deg, rgba(19, 140, 255, 0.42), transparent 18%) bottom right / 1px 72px no-repeat;
+}
+
+.cyber-light-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    transparent 38%,
+    rgba(105, 225, 255, 0.03) 44%,
+    rgba(105, 225, 255, 0.12) 50%,
+    rgba(105, 225, 255, 0.03) 56%,
+    transparent 62%,
+    transparent 100%
+  );
+  background-size: 240% 100%;
+  animation: cyber-light-sweep 9s linear infinite;
+}
+
+@keyframes cyber-light-sweep {
+  from { background-position: 140% 0; }
+  to { background-position: -140% 0; }
+}
+
+.cyber-border-energy {
+  position: relative;
+}
+
+.cyber-border-energy::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 4;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 217, 255, 0.12),
+    rgba(0, 217, 255, 0.7),
+    rgba(19, 140, 255, 0.24),
+    rgba(0, 217, 255, 0.12)
+  );
+  background-size: 220% 100%;
+  animation: cyber-border-flow 7s linear infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+@keyframes cyber-border-flow {
+  to { background-position: 220% 0; }
+}
+
+/* Sidebar and header depth. */
+.cyber-sidebar {
+  border-right-color: rgba(0, 217, 255, 0.28) !important;
+  background:
+    linear-gradient(180deg, rgba(3, 17, 40, 0.98), rgba(2, 8, 23, 0.98)) !important;
+  box-shadow: 12px 0 38px rgba(0, 0, 0, 0.34), 1px 0 0 rgba(0, 217, 255, 0.07) inset;
+}
+
+.cyber-header {
+  border-bottom-color: rgba(0, 217, 255, 0.24) !important;
+  background: linear-gradient(90deg, rgba(2, 8, 23, 0.94), rgba(3, 17, 40, 0.9), rgba(2, 8, 23, 0.94)) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24), 0 -1px 0 rgba(57, 239, 255, 0.06) inset;
+}
+
+.cyber-brand {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cyber-text);
+  text-shadow: 0 0 18px rgba(0, 217, 255, 0.24);
+}
+
+.cyber-nav-link {
+  position: relative;
+  border: 1px solid transparent;
+  transition:
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.cyber-nav-link:hover {
+  border-color: rgba(0, 217, 255, 0.28);
+  background: rgba(0, 217, 255, 0.07) !important;
+  box-shadow: inset 0 0 18px rgba(0, 217, 255, 0.05);
+}
+
+.cyber-nav-link[data-active="true"] {
+  color: var(--cyber-cyan-bright) !important;
+  border-color: rgba(0, 217, 255, 0.54);
+  background: linear-gradient(90deg, rgba(0, 217, 255, 0.14), rgba(19, 140, 255, 0.06)) !important;
+  box-shadow: 0 0 18px rgba(0, 217, 255, 0.12), inset 2px 0 0 var(--cyber-cyan);
+}
+
+/* Buttons remain stationary. */
+.cyber-button {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(0, 217, 255, 0.32) !important;
+  box-shadow: inset 0 1px 0 rgba(220, 250, 255, 0.1), 0 0 14px rgba(0, 217, 255, 0.08);
+  transition:
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease !important;
+}
+
+.cyber-button:hover {
+  border-color: rgba(57, 239, 255, 0.68) !important;
+  box-shadow: inset 0 1px 0 rgba(220, 250, 255, 0.14), 0 0 20px rgba(0, 217, 255, 0.18);
+}
+
+.cyber-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 34%, rgba(255,255,255,0.12) 50%, transparent 66%);
+  background-size: 230% 100%;
+  animation: cyber-button-sweep 6s linear infinite;
+}
+
+@keyframes cyber-button-sweep {
+  from { background-position: 130% 0; }
+  to { background-position: -130% 0; }
+}
+
+/* Inputs and CLI editor. */
+.cyber-input,
+input,
+select,
+textarea {
+  border-color: rgba(0, 217, 255, 0.25) !important;
+  background-color: rgba(2, 10, 26, 0.84) !important;
+  box-shadow: inset 0 1px 10px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 217, 255, 0.025);
+  transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(57, 239, 255, 0.68) !important;
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.14), inset 0 1px 10px rgba(0, 0, 0, 0.24) !important;
+}
+
+.cyber-cli-editor {
+  background:
+    linear-gradient(rgba(0, 217, 255, 0.025) 1px, transparent 1px),
+    rgba(1, 7, 20, 0.94) !important;
+  background-size: 100% 24px !important;
+  color: #c9f7ff !important;
+  caret-color: var(--cyber-cyan-bright);
+  text-shadow: 0 0 10px rgba(0, 217, 255, 0.06);
+}
+
+/* Metric cards. */
+.cyber-metric-card {
+  min-height: 112px;
+}
+
+.cyber-metric-card::after {
+  content: "";
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  right: 14px;
+  top: 14px;
+  border-radius: 999px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, rgba(57, 239, 255, 0.2) 0 2px, transparent 3px),
+    radial-gradient(circle, transparent 48%, rgba(0, 217, 255, 0.18) 50% 52%, transparent 54%);
+  box-shadow: 0 0 22px rgba(0, 217, 255, 0.08);
+  animation: cyber-icon-pulse 5s ease-in-out infinite;
+}
+
+@keyframes cyber-icon-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.95; }
+}
+
+.cyber-metric-value {
+  color: var(--cyber-text);
+  text-shadow: 0 0 18px rgba(0, 217, 255, 0.2);
+}
+
+/* Tables stay fixed. */
+.cyber-table {
+  border-color: rgba(0, 217, 255, 0.28) !important;
+  background: rgba(2, 10, 25, 0.66);
+  box-shadow: inset 0 1px 0 rgba(57, 239, 255, 0.06);
+}
+
+.cyber-table thead {
+  background: linear-gradient(180deg, rgba(8, 35, 74, 0.92), rgba(5, 24, 51, 0.92));
+}
+
+.cyber-table th {
+  color: #aeeeff !important;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.cyber-table tbody tr {
+  border-color: rgba(0, 217, 255, 0.1) !important;
+}
+
+.cyber-table tbody tr:hover {
+  background: rgba(0, 217, 255, 0.055) !important;
+}
+
+.cyber-finding {
+  border-color: rgba(0, 217, 255, 0.2) !important;
+  background: linear-gradient(145deg, rgba(7, 29, 60, 0.58), rgba(2, 10, 25, 0.72));
+  box-shadow: inset 3px 0 0 rgba(0, 217, 255, 0.34);
+}
+
+/* CSS-only radar decoration for the sticky header. */
+.cyber-header::before,
+.cyber-header::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: 999px;
+}
+
+.cyber-header::before {
+  right: 18%;
+  width: 86px;
+  height: 86px;
+  border: 1px solid rgba(0, 217, 255, 0.13);
+  background:
+    radial-gradient(circle, rgba(0, 217, 255, 0.18) 0 2px, transparent 3px),
+    repeating-radial-gradient(circle, transparent 0 11px, rgba(0, 217, 255, 0.08) 12px 13px);
+  animation: cyber-radar-pulse 6s ease-in-out infinite;
+}
+
+.cyber-header::after {
+  right: calc(18% + 42px);
+  width: 1px;
+  height: 40px;
+  transform-origin: 50% 100%;
+  background: linear-gradient(transparent, rgba(57, 239, 255, 0.4));
+  animation: cyber-radar-sweep 14s linear infinite;
+}
+
+@keyframes cyber-radar-pulse {
+  0%, 100% { opacity: 0.38; }
+  50% { opacity: 0.72; }
+}
+
+@keyframes cyber-radar-sweep {
+  to { transform: rotate(360deg); }
+}
+
+/* Motion controls. These can be activated later from Settings. */
+html[data-motion="off"] body::after,
+html[data-motion="off"] .cyber-app::after,
+html[data-motion="off"] .cyber-light-sweep::after,
+html[data-motion="off"] .cyber-border-energy::before,
+html[data-motion="off"] .cyber-button::after,
+html[data-motion="off"] .cyber-metric-card::after,
+html[data-motion="off"] .cyber-header::before,
+html[data-motion="off"] .cyber-header::after {
+  animation: none !important;
+}
+
+html[data-motion="reduced"] body::after {
+  animation-duration: 40s;
+  opacity: 0.24;
+}
+
+html[data-motion="reduced"] .cyber-app::after,
+html[data-motion="reduced"] .cyber-button::after {
+  display: none;
+}
+
+html[data-motion="reduced"] .cyber-light-sweep::after,
+html[data-motion="reduced"] .cyber-border-energy::before,
+html[data-motion="reduced"] .cyber-header::after {
+  animation-duration: 24s;
+}
+
+@media (max-width: 767px) {
+  body::after {
+    opacity: 0.22;
+    background-size: 64px 64px, 64px 64px, 220px 220px, 240px 240px, 280px 280px, 320px 320px;
+  }
+
+  .cyber-header::before,
+  .cyber-header::after {
+    display: none;
+  }
+
+  .cyber-panel {
+    box-shadow:
+      0 0 0 1px rgba(0, 217, 255, 0.05) inset,
+      0 12px 28px rgba(0, 0, 0, 0.36),
+      inset 0 1px 0 rgba(170, 240, 255, 0.08) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::after,
+  .cyber-app::after,
+  .cyber-light-sweep::after,
+  .cyber-border-energy::before,
+  .cyber-button::after,
+  .cyber-metric-card::after,
+  .cyber-header::before,
+  .cyber-header::after {
+    animation: none !important;
+  }
+}
