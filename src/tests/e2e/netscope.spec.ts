@@ -25,3 +25,18 @@ test("metric cards drill into real processed data", async ({ page }) => {
   await page.getByRole("button", { name: /IP \u0e17\u0e35\u0e48\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19/ }).first().click();
   await expect(page.getByRole("cell", { name: /\d+\.\d+\.\d+\.\d+/ }).first()).toBeVisible();
 });
+
+test("opens subnet and IP MAC audit details in modal dialogs", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "\u0e42\u0e2b\u0e25\u0e14\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07" }).click();
+  await page.getByRole("button", { name: "\u0e27\u0e34\u0e40\u0e04\u0e23\u0e32\u0e30\u0e2b\u0e4c" }).first().click();
+
+  await page.getByRole("button", { name: "Open selected subnet audit" }).click();
+  await expect(page.getByRole("dialog", { name: /Subnet audit:/ })).toBeVisible();
+  await expect(page.getByText("show ip arp").first()).toBeVisible();
+  await page.getByRole("button", { name: "Close details" }).click();
+
+  await page.getByRole("button", { name: "Open selected IP / MAC detail" }).click();
+  await expect(page.getByRole("dialog", { name: /IP \/ MAC detail:/ })).toBeVisible();
+  await expect(page.getByText("Selected item problem summary")).toBeVisible();
+});

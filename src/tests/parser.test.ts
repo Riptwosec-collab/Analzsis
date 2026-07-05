@@ -222,4 +222,12 @@ describe("analysis", () => {
     expect(result.securityChecks.length).toBeGreaterThan(0);
     expect(result.telegramSummary).toContain("Network Analysis Summary");
   });
+
+  it("does not classify addresses inside a DHCP dynamic pool as likely free without lease evidence", () => {
+    const result = analyzeCli(SAMPLE_DATA);
+    const poolCandidate = result.ipInventory.find(item => item.ip === "10.10.10.30");
+    expect(poolCandidate?.status).toBe("Unknown");
+    expect(poolCandidate?.sources).toContain("DHCP Pool range");
+    expect(result.freeIps.some(item => item.ip === "10.10.10.30")).toBe(false);
+  });
 });

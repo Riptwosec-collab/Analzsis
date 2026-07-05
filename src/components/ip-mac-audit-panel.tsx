@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
+import { AuditModal } from "@/components/audit-modal";
 import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAnalysisStore } from "@/store/analysis-store";
 
@@ -10,6 +12,7 @@ export function IpMacAuditPanel() {
   const result = useAnalysisStore(state => state.result);
   const [selectedIp, setSelectedIp] = useState("");
   const [query, setQuery] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const filteredRows = useMemo(() => {
     if (!result) return [];
@@ -75,7 +78,38 @@ export function IpMacAuditPanel() {
               <Summary label="Evidence" value={String(selected.evidence.length)} />
             </div>
 
-            <IpMacCheckDetails row={selected} language="th" />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" onClick={() => setDetailsOpen(true)}>Open selected IP / MAC detail</Button>
+              <div className="text-xs text-muted-foreground">Showing detail only for the selected IP/MAC when opened.</div>
+            </div>
+
+            <div className="max-h-80 overflow-auto rounded-lg border border-cyan-400/15">
+              {filteredRows.slice(0, 80).map(row => (
+                <button
+                  key={row.ip}
+                  type="button"
+                  onClick={() => {
+                    setSelectedIp(row.ip);
+                    setDetailsOpen(true);
+                  }}
+                  className={`grid w-full gap-2 border-b border-cyan-400/10 px-3 py-2 text-left text-xs hover:bg-cyan-400/10 md:grid-cols-[140px_110px_minmax(0,1fr)_160px] ${row.ip === selected.ip ? "bg-cyan-400/10" : ""}`}
+                >
+                  <span className="font-mono text-cyan-100">{row.ip}</span>
+                  <span>{row.status}</span>
+                  <span className="font-mono text-cyan-100/80">{row.macs.join(", ") || "No MAC"}</span>
+                  <span>{row.sources.join(", ") || "-"}</span>
+                </button>
+              ))}
+            </div>
+
+            <AuditModal
+              open={detailsOpen}
+              onClose={() => setDetailsOpen(false)}
+              title={`IP / MAC detail: ${selected.ip}`}
+              subtitle={`${selected.status} · ${selected.macs.join(", ") || "No MAC"} · ${selected.sources.join(", ") || "No source"}`}
+            >
+              <IpMacCheckDetails row={selected} language="th" />
+            </AuditModal>
           </CardContent>
         </Card>
       </div>

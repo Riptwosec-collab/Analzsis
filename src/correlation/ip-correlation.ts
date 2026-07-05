@@ -169,6 +169,16 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
     for (let value = start; value <= end; value += 1) {
       const ip = numberToIp(value);
       if (!map.has(ip) && !arpIps.has(ip)) {
+        const pool = findDynamicPoolForIp(dataset, ip);
+        if (pool) {
+          touch(ip, {
+            status: "Unknown",
+            confidence: 55,
+            sources: ["DHCP Pool range"],
+            evidence: pool.evidence
+          });
+          continue;
+        }
         touch(ip, {
           status: "Likely Free",
           confidence: dataset.arp.length || dataset.dhcpBindings.length ? 65 : 35,
@@ -180,6 +190,13 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
   }
 
   return [...map.values()].sort((a, b) => (ipToNumber(a.ip) ?? 0) - (ipToNumber(b.ip) ?? 0));
+}
+
+function findDynamicPoolForIp(dataset: ParsedDataset, ip: string) {
+  return dataset.dhcpPools.find(pool => {
+    if (pool.poolType === "Reservation" || pool.host || !pool.network || pool.prefix === undefined) return false;
+    return ipInSubnet(ip, pool.network, pool.prefix);
+  });
 }
 
 function findDuplicateIpFindings(inventory: IpInventoryRecord[]): Finding[] {

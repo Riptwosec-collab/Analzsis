@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
+import { AuditModal } from "@/components/audit-modal";
 import { SubnetCheckDetails } from "@/components/subnet-check-details";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAnalysisStore } from "@/store/analysis-store";
 
@@ -10,6 +12,7 @@ export function SubnetAuditPanel() {
   const result = useAnalysisStore(state => state.result);
   const [selectedCidr, setSelectedCidr] = useState("");
   const [query, setQuery] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const filtered = useMemo(() => {
     if (!result) return [];
@@ -75,7 +78,39 @@ export function SubnetAuditPanel() {
               <Summary label="Utilization" value={`${selected.utilization}%`} />
             </div>
 
-            <SubnetCheckDetails subnet={selected} language="th" />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" onClick={() => setDetailsOpen(true)}>Open selected subnet audit</Button>
+              <div className="text-xs text-muted-foreground">The modal shows only checks and evidence related to the selected subnet.</div>
+            </div>
+
+            <div className="max-h-72 overflow-auto rounded-lg border border-cyan-400/15">
+              {filtered.map(subnet => (
+                <button
+                  key={subnet.cidr}
+                  type="button"
+                  onClick={() => {
+                    setSelectedCidr(subnet.cidr);
+                    setDetailsOpen(true);
+                  }}
+                  className={`grid w-full gap-2 border-b border-cyan-400/10 px-3 py-2 text-left text-xs hover:bg-cyan-400/10 md:grid-cols-[150px_repeat(4,minmax(0,1fr))] ${subnet.cidr === selected.cidr ? "bg-cyan-400/10" : ""}`}
+                >
+                  <span className="font-mono text-cyan-100">{subnet.cidr}</span>
+                  <span>Used {subnet.used}</span>
+                  <span>Free {subnet.free}</span>
+                  <span>Utilization {subnet.utilization}%</span>
+                  <span className="font-mono">{subnet.firstHost} - {subnet.lastHost}</span>
+                </button>
+              ))}
+            </div>
+
+            <AuditModal
+              open={detailsOpen}
+              onClose={() => setDetailsOpen(false)}
+              title={`Subnet audit: ${selected.cidr}`}
+              subtitle={`Used ${selected.used} · Free ${selected.free} · Utilization ${selected.utilization}%`}
+            >
+              <SubnetCheckDetails subnet={selected} language="th" />
+            </AuditModal>
           </CardContent>
         </Card>
       </div>

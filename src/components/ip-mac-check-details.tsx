@@ -40,6 +40,13 @@ export function IpMacCheckDetails({ row, language }: IpMacCheckDetailsProps) {
         </p>
       </div>
 
+      <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+        <div className="text-sm font-medium">Selected item problem summary</div>
+        <ul className="mt-2 space-y-1 text-xs leading-5 text-cyan-50/80">
+          {model.problemLines.map(line => <li key={line}>- {line}</li>)}
+        </ul>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {model.checks.map(check => (
           <article key={check.id} className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
@@ -268,6 +275,18 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
 
   return {
     checks,
+    problemLines: buildProblemLines({
+      row,
+      language,
+      vlanMismatch,
+      portMismatch,
+      duplicateFinding,
+      blockedFinding,
+      relatedFindings,
+      relatedLogs,
+      macDetails,
+      networkPools
+    }),
     subnets: subnets.map(item => item.cidr),
     arpSummary: arpMatches.length ? `${arpMatches.length} record(s)` : "-",
     dhcpSummary: `${dhcpBindings.length} binding(s), ${reservationPools.length} reservation(s)`,
@@ -276,6 +295,68 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
     macDetails,
     evidenceLines
   };
+}
+
+function buildProblemLines({
+  row,
+  language,
+  vlanMismatch,
+  portMismatch,
+  duplicateFinding,
+  blockedFinding,
+  relatedFindings,
+  relatedLogs,
+  macDetails,
+  networkPools
+}: {
+  row: IpInventoryRecord;
+  language: "en" | "th";
+  vlanMismatch: boolean;
+  portMismatch: boolean;
+  duplicateFinding: boolean;
+  blockedFinding: boolean;
+  relatedFindings: Finding[];
+  relatedLogs: AnalysisResult["logs"];
+  macDetails: Array<{ mac: string; ports: string[]; arpIps: string[]; dhcpIps: string[]; findingTitles: string[]; hasWarning: boolean }>;
+  networkPools: AnalysisResult["dhcpPools"];
+}) {
+  const lines: string[] = [];
+  if (row.status === "Unknown" && row.sources.includes("DHCP Pool range")) {
+    lines.push(language === "th"
+      ? `${row.ip} อยู่ใน DHCP Pool แต่ยังไม่มี ARP/DHCP lease ยืนยัน จึงไม่ถือว่าว่าง`
+      : `${row.ip} is inside a DHCP pool but has no ARP/DHCP lease evidence, so it is not treated as free.`);
+  }
+  if (row.macs.length > 1 || duplicateFinding) {
+    lines.push(language === "th"
+      ? `${row.ip} มีหลาย MAC หรือมี finding ประเภท duplicate: ${row.macs.join(", ") || relatedFindings.map(item => item.target).filter(Boolean).join(", ")}`
+      : `${row.ip} has multiple MACs or a duplicate-related finding: ${row.macs.join(", ") || relatedFindings.map(item => item.target).filter(Boolean).join(", ")}`);
+  }
+  if (vlanMismatch || portMismatch) {
+    lines.push(language === "th"
+      ? "ARP กับ MAC table ชี้ VLAN/Port ไม่ตรงกัน ต้องตรวจ uplink, trunk, port-channel หรือ endpoint move"
+      : "ARP and MAC-table evidence disagree on VLAN/port. Check uplinks, trunks, port-channels, or endpoint movement.");
+  }
+  for (const mac of macDetails.filter(item => item.hasWarning)) {
+    lines.push(language === "th"
+      ? `MAC ${mac.mac} มีข้อสังเกต: ports=${mac.ports.join(", ") || "-"}, ARP IP=${mac.arpIps.join(", ") || "-"}, DHCP IP=${mac.dhcpIps.join(", ") || "-"}, findings=${mac.findingTitles.join(", ") || "-"}`
+      : `MAC ${mac.mac} needs review: ports=${mac.ports.join(", ") || "-"}, ARP IP=${mac.arpIps.join(", ") || "-"}, DHCP IP=${mac.dhcpIps.join(", ") || "-"}, findings=${mac.findingTitles.join(", ") || "-"}`);
+  }
+  if (blockedFinding) {
+    lines.push(language === "th"
+      ? `พบ event/finding ที่เกี่ยวกับการ block/deny/violation จำนวน ${relatedLogs.length + relatedFindings.length} รายการ`
+      : `Found ${relatedLogs.length + relatedFindings.length} block/deny/violation-related event(s) or finding(s).`);
+  }
+  if (!lines.length) {
+    lines.push(language === "th"
+      ? `ยังไม่พบความผิดปกติชัดเจนสำหรับ ${row.ip} จากหลักฐานปัจจุบัน แต่ต้องดูว่าคำสั่ง ARP/DHCP/MAC ครบหรือไม่`
+      : `No clear anomaly was found for ${row.ip} in the current evidence. Confirm that ARP, DHCP, and MAC-table data were all collected.`);
+  }
+  if (networkPools.length && row.status !== "Used" && row.status !== "Reserved") {
+    lines.push(language === "th"
+      ? `เกี่ยวข้องกับ DHCP Pool: ${networkPools.map(pool => pool.name).join(", ")}`
+      : `Related DHCP pool(s): ${networkPools.map(pool => pool.name).join(", ")}`);
+  }
+  return lines;
 }
 
 function commandCheck(id: string, title: string, collected: boolean, matches: number, detail: string, sources: string[]): CheckItem {
