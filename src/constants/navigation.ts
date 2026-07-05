@@ -1,35 +1,53 @@
 import {
   AlertTriangle,
   Blocks,
-  FileDown,
   Gauge,
   GitBranch,
   HardDrive,
   Import,
-  ListChecks,
   Network,
   Router,
   Search,
   ShieldCheck,
-  Split,
-  Wrench
+  Split
 } from "lucide-react";
 
-export const NAV_ITEMS = [
-  { id: "overview", href: "/", label: "Overview", icon: Gauge },
-  { id: "import", href: "/import", label: "CLI Import", icon: Import },
-  { id: "ip-inventory", href: "/ip-inventory", label: "IP Inventory", icon: Network },
-  { id: "free-ip", href: "/free-ip", label: "Free IP", icon: Search },
-  { id: "used-ip", href: "/used-ip", label: "Used IP", icon: HardDrive },
-  { id: "devices", href: "/devices", label: "Devices", icon: Router },
-  { id: "vlans", href: "/vlans", label: "VLAN & Ports", icon: Split },
-  { id: "conflicts", href: "/conflicts", label: "Conflicts", icon: AlertTriangle },
-  { id: "security", href: "/security", label: "Security", icon: ShieldCheck },
-  { id: "blocked-devices", href: "/blocked-devices", label: "Blocked Devices", icon: Blocks },
-  { id: "topology", href: "/topology", label: "Topology", icon: GitBranch },
-  { id: "troubleshooting", href: "/troubleshooting", label: "Troubleshooting", icon: Wrench },
-  { id: "reports", href: "/reports", label: "Reports", icon: FileDown },
-  { id: "settings", href: "/settings", label: "Settings", icon: ListChecks }
+export const VIEW_IDS = [
+  "overview",
+  "import",
+  "ip-inventory",
+  "free-ip",
+  "used-ip",
+  "devices",
+  "vlans",
+  "conflicts",
+  "security",
+  "blocked-devices",
+  "topology",
+  "troubleshooting",
+  "reports",
+  "settings"
 ] as const;
 
-export type ViewId = typeof NAV_ITEMS[number]["id"];
+export type ViewId = (typeof VIEW_IDS)[number];
+
+export function isViewId(value: string | undefined): value is ViewId {
+  return Boolean(value && (VIEW_IDS as readonly string[]).includes(value));
+}
+
+// All visible analysis sections now open inside the same root page.
+// Troubleshooting, Reports, and Settings remain available internally,
+// but are intentionally removed from the sidebar as requested.
+export const NAV_ITEMS = [
+  { id: "overview", href: "/?view=overview", label: "Overview", icon: Gauge },
+  { id: "import", href: "/?view=import", label: "CLI Import", icon: Import },
+  { id: "ip-inventory", href: "/?view=ip-inventory", label: "IP Inventory", icon: Network },
+  { id: "free-ip", href: "/?view=free-ip", label: "Free IP", icon: Search },
+  { id: "used-ip", href: "/?view=used-ip", label: "Used IP", icon: HardDrive },
+  { id: "devices", href: "/?view=devices", label: "Devices", icon: Router },
+  { id: "vlans", href: "/?view=vlans", label: "VLAN & Ports", icon: Split },
+  { id: "conflicts", href: "/?view=conflicts", label: "Conflicts", icon: AlertTriangle },
+  { id: "security", href: "/?view=security", label: "Security", icon: ShieldCheck },
+  { id: "blocked-devices", href: "/?view=blocked-devices", label: "Blocked Devices", icon: Blocks },
+  { id: "topology", href: "/?view=topology", label: "Topology", icon: GitBranch }
+] as const;
