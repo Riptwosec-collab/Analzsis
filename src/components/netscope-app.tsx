@@ -479,7 +479,7 @@ function TabStrip({
                   : "border-cyan-400/20 bg-background/40 hover:border-cyan-300/50 hover:text-cyan-100"
               )}
             >
-              {t.tabs[item.id]} {count > 0 ? <span className="ms-1 rounded-full bg-cyan-400/15 px-1.5">{count}</span> : null}
+              {(t.tabs as Record<ViewId, string>)[item.id] ?? item.label} {count > 0 ? <span className="ms-1 rounded-full bg-cyan-400/15 px-1.5">{count}</span> : null}
             </button>
           );
         })}
