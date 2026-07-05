@@ -1,6 +1,7 @@
 import { ConfigurationView } from "@/components/configuration-view";
 import { IpMacAuditPanel } from "@/components/ip-mac-audit-panel";
 import { NetScopeApp } from "@/components/netscope-app";
+import { SubnetAuditPanel } from "@/components/subnet-audit-panel";
 import { isViewId } from "@/constants/navigation";
 
 type PageSearchParams = {
@@ -17,6 +18,7 @@ export default async function Page({ searchParams }: { searchParams?: PageSearch
   return (
     <>
       <NetScopeApp initialView={initialView} />
+      <SubnetAuditPanel />
       <IpMacAuditPanel />
     </>
   );
