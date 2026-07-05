@@ -1,4 +1,4 @@
-import type { AnalysisResult, DeviceRecord, Finding, ParsedDataset } from "@/types/network";
+import type { AnalysisResult, DeviceRecord, Finding, ParsedDataset, SecurityCheck } from "@/types/network";
 import { correlate } from "@/correlation/ip-correlation";
 import { findConfigurationFindings } from "@/correlation/config-findings";
 import { detectCommandBlocks } from "@/parsers/detector/command-detector";
@@ -31,7 +31,32 @@ export function parseCli(input: string): ParsedDataset {
 
 export function analyzeCli(input: string): AnalysisResult {
   const dataset = parseCli(input);
-  return correlate(dataset);
+  const result = correlate(dataset);
+  const applicable = result.securityChecks.filter(check => check.status !== "Not Applicable");
+  const supported = applicable.filter(check => check.status !== "Unknown");
+
+  result.securityScore = calculateEvidenceAwareSecurityScore(result.securityChecks);
+  result.evidenceCoverage = applicable.length
+    ? Math.round((supported.length / applicable.length) * 100)
+    : 0;
+
+  return result;
+}
+
+function calculateEvidenceAwareSecurityScore(checks: SecurityCheck[]): number {
+  const penalty = checks.reduce((total, check) => {
+    if (check.status === "Passed" || check.status === "Unknown" || check.status === "Not Applicable") return total;
+    const weight = check.severity === "Critical"
+      ? 25
+      : check.severity === "High"
+        ? 18
+        : check.severity === "Medium"
+          ? 10
+          : 4;
+    return total + (check.status === "Warning" ? Math.ceil(weight / 2) : weight);
+  }, 0);
+
+  return Math.max(0, 100 - penalty);
 }
 
 function collectDevices(blocks: ParsedDataset["commandBlocks"], parsedDevices: DeviceRecord[]): DeviceRecord[] {
