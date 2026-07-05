@@ -22,28 +22,34 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
+
           path = Path('src/components/netscope-app.tsx')
           text = path.read_text(encoding='utf-8')
-          old = '''  return {
-              Passed: "ผ่าน",
-              Failed: "ไม่ผ่าน",
-              Warning: "เตือน",
-              Unknown: "ไม่ทราบ"
-            }[status];'''
-          new = '''  return {
-              Passed: "ผ่าน",
-              Failed: "ไม่ผ่าน",
-              Warning: "เตือน",
-              Unknown: "ไม่ทราบ",
-              "Not Applicable": "ไม่เกี่ยวข้อง"
-            }[status];'''
-          if old not in text:
-              raise SystemExit('Expected translateCheckStatus block was not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          if '"Not Applicable": "ไม่เกี่ยวข้อง"' in text:
+              raise SystemExit(0)
+
+          pattern = re.compile(
+              r'(function translateCheckStatus\([\s\S]*?Unknown:\s*"ไม่ทราบ")\s*(\n\s*}\[status\];)',
+              re.MULTILINE,
+          )
+          updated, count = pattern.subn(
+              r'\1,\n    "Not Applicable": "ไม่เกี่ยวข้อง"\2',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit('translateCheckStatus mapping was not found')
+
+          path.write_text(updated, encoding='utf-8')
           PY
 
       - name: Commit patch
         run: |
+          if git diff --quiet; then
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/components/netscope-app.tsx
