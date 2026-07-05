@@ -37,6 +37,7 @@ export const translations = {
     tabs: {
       overview: "Overview",
       import: "CLI Import",
+      configuration: "Config Analysis",
       "ip-inventory": "IP Inventory",
       "free-ip": "Free IP",
       "used-ip": "Used IP",
@@ -158,6 +159,7 @@ export const translations = {
     tabs: {
       overview: "ภาพรวม",
       import: "นำเข้า CLI",
+      configuration: "วิเคราะห์ Config",
       "ip-inventory": "ทะเบียน IP",
       "free-ip": "IP ที่น่าจะว่าง",
       "used-ip": "IP ที่ใช้งาน",
