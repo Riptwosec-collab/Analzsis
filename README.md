@@ -4,24 +4,6 @@ Network CLI Analysis & Security Audit Platform for router, switch, firewall, and
 
 NetScope analyzes the current CLI input locally in the browser. It does not send commands to network devices and does not store raw CLI by default. This repository intentionally excludes snapshot history and before/after comparison features.
 
-## Civic self-check page
-
-The repository also includes a standalone Civic Care self-check page at:
-
-```text
-/civic-check
-```
-
-The page includes:
-
-- Search and category/status filters
-- LocalStorage results for Normal, Watch, and Service Center
-- Pre-drive, tyre, brake, steering, lighting, engine-bay, hybrid, and emergency checks
-- Safety notes for Honda Civic e:HEV high-voltage systems
-- Official reference links from DVSA and NHTSA
-
-The self-check page is separate from NetScope and does not replace the network analyzer.
-
 ## Features
 
 - Smart CLI import for paste and `.txt`, `.log`, `.cfg`, `.conf` files
@@ -115,13 +97,9 @@ Rules should produce a `Finding` with severity, confidence, evidence, recommenda
 
 NetScope processes CLI locally. Raw CLI is held in memory for the current browser session only unless the user explicitly exports a report. Use the sensitive-data scanner before sharing output.
 
-The Civic self-check page stores inspection statuses and notes in the current browser using LocalStorage.
-
 ## Security Disclaimer
 
 Analysis quality depends on the CLI data supplied by the user. An IP not found in ARP or DHCP is not guaranteed to be free. Remediation commands must be reviewed before use. NetScope is not a substitute for change management or a network monitoring platform.
-
-The Civic self-check page is general guidance. Vehicle-specific pressures, fluids, warning messages, and procedures must follow the vehicle placard and owner manual. High-voltage hybrid components must be handled by qualified technicians.
 
 ## Known Limitations
 
