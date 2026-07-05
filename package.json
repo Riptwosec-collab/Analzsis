@@ -1,13 +1,44 @@
 {
-  "name": "smart-ip-dhcp-security-analyzer",
-  "version": "1.0.0",
+  "name": "netscope-analyzer",
+  "version": "0.1.0",
   "private": true,
-  "description": "Single-file Smart IP, DHCP & Security Analyzer with local smoke tests.",
+  "description": "Network CLI Analysis & Security Audit Platform.",
   "scripts": {
-    "start": "node tools/serve.js",
-    "test": "node tools/smoke-test.js"
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint src next.config.ts playwright.config.ts vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@radix-ui/react-slot": "latest",
+    "@tanstack/react-table": "latest",
+    "@xyflow/react": "latest",
+    "class-variance-authority": "latest",
+    "clsx": "latest",
+    "jspdf": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "next-themes": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "recharts": "latest",
+    "tailwind-merge": "latest",
+    "zod": "latest",
+    "zustand": "latest"
   },
   "devDependencies": {
-    "jsdom": "^29.1.1"
+    "@playwright/test": "latest",
+    "@tailwindcss/postcss": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint": "latest",
+    "eslint-config-next": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
   }
 }
