@@ -1,5 +1,18 @@
 import { NetScopeApp } from "@/components/netscope-app";
+import { isViewId } from "@/constants/navigation";
 
-export default function Page() {
-  return <NetScopeApp initialView="overview" />;
+type PageSearchParams = {
+  view?: string | string[];
+};
+
+export default async function Page({
+  searchParams
+}: {
+  searchParams?: PageSearchParams | Promise<PageSearchParams>;
+}) {
+  const params = (await searchParams) ?? {};
+  const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
+  const initialView = isViewId(requestedView) ? requestedView : "overview";
+
+  return <NetScopeApp initialView={initialView} />;
 }
