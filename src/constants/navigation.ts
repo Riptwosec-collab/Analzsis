@@ -1,23 +1,22 @@
 import {
   AlertTriangle,
   Blocks,
-  FileDown,
+  FileSearch,
   Gauge,
   GitBranch,
   HardDrive,
   Import,
-  ListChecks,
   Network,
   Router,
   Search,
   ShieldCheck,
-  Split,
-  Wrench
+  Split
 } from "lucide-react";
 
 export const VIEW_IDS = [
   "overview",
   "import",
+  "configuration",
   "ip-inventory",
   "free-ip",
   "used-ip",
@@ -38,10 +37,10 @@ export function isViewId(value: string | undefined): value is ViewId {
   return Boolean(value && (VIEW_IDS as readonly string[]).includes(value));
 }
 
-// All visible analysis sections open inside the same root page.
 export const NAV_ITEMS = [
   { id: "overview", href: "/?view=overview", label: "Overview", icon: Gauge },
   { id: "import", href: "/?view=import", label: "CLI Import", icon: Import },
+  { id: "configuration", href: "/?view=configuration", label: "Config Analysis", icon: FileSearch },
   { id: "ip-inventory", href: "/?view=ip-inventory", label: "IP Inventory", icon: Network },
   { id: "free-ip", href: "/?view=free-ip", label: "Free IP", icon: Search },
   { id: "used-ip", href: "/?view=used-ip", label: "Used IP", icon: HardDrive },
@@ -50,8 +49,5 @@ export const NAV_ITEMS = [
   { id: "conflicts", href: "/?view=conflicts", label: "Conflicts", icon: AlertTriangle },
   { id: "security", href: "/?view=security", label: "Security", icon: ShieldCheck },
   { id: "blocked-devices", href: "/?view=blocked-devices", label: "Blocked Devices", icon: Blocks },
-  { id: "topology", href: "/?view=topology", label: "Topology", icon: GitBranch },
-  { id: "troubleshooting", href: "/?view=troubleshooting", label: "Troubleshooting", icon: Wrench },
-  { id: "reports", href: "/?view=reports", label: "Reports", icon: FileDown },
-  { id: "settings", href: "/?view=settings", label: "Settings", icon: ListChecks }
+  { id: "topology", href: "/?view=topology", label: "Topology", icon: GitBranch }
 ] as const;
