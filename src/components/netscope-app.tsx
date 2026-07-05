@@ -14,7 +14,6 @@ import {
   FileSpreadsheet,
   FileText,
   HelpCircle,
-  Home,
   Loader2,
   Moon,
   Power,
@@ -94,9 +93,7 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
 
   return (
     <div className="cyber-app min-h-screen bg-background px-3 py-4 text-foreground md:px-5">
-      <div className="mx-auto grid max-w-[1500px] gap-4 lg:grid-cols-[86px_minmax(0,1fr)]">
-        <IconRail activeView={activeView} setActiveView={setActiveView} result={result} t={t} criticalCount={criticalCount} />
-
+      <div className="mx-auto max-w-[1500px]">
         <main className="space-y-4">
           <HeroHeader
             t={t}
@@ -127,7 +124,7 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
 
           <MetricGrid t={t} result={result} preview={preview} />
 
-          <ControlBand t={t} result={result} />
+          <ControlBand t={t} result={result} query={query} setQuery={setQuery} />
 
           <TabStrip t={t} activeView={activeView} setActiveView={setActiveView} result={result} criticalCount={criticalCount} />
 
@@ -143,50 +140,6 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
         </main>
       </div>
     </div>
-  );
-}
-
-function IconRail({
-  activeView,
-  setActiveView,
-  result,
-  t,
-  criticalCount
-}: {
-  activeView: ViewId;
-  setActiveView: (view: ViewId) => void;
-  result: AnalysisResult | null;
-  t: Copy;
-  criticalCount: number;
-}) {
-  return (
-    <aside className="cyber-sidebar cyber-panel sticky top-4 hidden h-[calc(100vh-2rem)] rounded-[1.35rem] border p-2 lg:block">
-      <div className="mb-5 flex h-16 items-center justify-center rounded-2xl border border-cyan-300/40 bg-cyan-400/10">
-        <CircuitBoard className="h-8 w-8 text-cyan-200" />
-      </div>
-      <nav className="space-y-2">
-        {NAV_ITEMS.map(item => {
-          const active = activeView === item.id;
-          const Icon = item.id === "overview" ? Home : item.icon;
-          const count = tabCount(item.id, result, criticalCount);
-          return (
-            <button
-              key={item.id}
-              type="button"
-              title={t.tabs[item.id]}
-              aria-label={t.tabs[item.id]}
-              onClick={() => setActiveView(item.id)}
-              data-active={active}
-              className="cyber-nav-link flex min-h-14 w-full flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-muted-foreground"
-            >
-              <Icon className="h-5 w-5" />
-              <span className="max-w-full truncate">{shortTabLabel(t.tabs[item.id])}</span>
-              {count > 0 ? <span className="rounded-full bg-cyan-400/15 px-1.5 text-[9px] text-cyan-100">{count}</span> : null}
-            </button>
-          );
-        })}
-      </nav>
-    </aside>
   );
 }
 
@@ -386,9 +339,19 @@ function MetricGrid({ t, result, preview }: { t: Copy; result: AnalysisResult | 
   );
 }
 
-function ControlBand({ t, result }: { t: Copy; result: AnalysisResult | null }) {
+function ControlBand({
+  t,
+  result,
+  query,
+  setQuery
+}: {
+  t: Copy;
+  result: AnalysisResult | null;
+  query: string;
+  setQuery: (query: string) => void;
+}) {
   return (
-    <div className="cyber-panel grid gap-3 rounded-xl border p-3 md:grid-cols-[160px_1fr_260px]">
+    <div className="cyber-panel grid gap-3 rounded-xl border p-3 md:grid-cols-[220px_1fr_260px]">
       <label className="grid gap-1 text-xs text-muted-foreground">
         {t.subnet}
         <select className="h-10 rounded-lg border px-3 text-sm text-foreground">
@@ -396,7 +359,18 @@ function ControlBand({ t, result }: { t: Copy; result: AnalysisResult | null }) 
           {result?.subnets.map(subnet => <option key={subnet.cidr}>{subnet.cidr}</option>)}
         </select>
       </label>
-      <div className="hidden md:block" />
+      <label className="grid gap-1 text-xs text-muted-foreground">
+        {t.actions.search}
+        <div className="flex gap-2">
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="10.36.2.0/24, IP, MAC, VLAN, Port"
+            className="h-10 min-w-0 flex-1 rounded-lg border px-3 text-sm"
+          />
+          <Button size="sm" variant="outline" className="h-10">{isThaiCopy(t) ? "ใช้" : "Apply"}</Button>
+        </div>
+      </label>
       <label className="grid gap-1 text-xs text-muted-foreground">
         {t.analysisTime}
         <div className="flex h-10 items-center rounded-lg border border-input bg-background/70 px-3 font-mono text-sm text-cyan-100">
@@ -582,6 +556,7 @@ function Overview({ result, t }: { result: AnalysisResult; t: Copy }) {
 
   return (
     <div className="space-y-4">
+      <CommandCoverage result={result} t={t} />
       <div className="grid gap-4 xl:grid-cols-2">
         <ChartCard title={t.panels.ipStatus}>
           <ResponsiveContainer width="100%" height={240}>
@@ -606,7 +581,41 @@ function Overview({ result, t }: { result: AnalysisResult; t: Copy }) {
         </ChartCard>
       </div>
       <Findings title={t.panels.criticalFindings} findings={result.findings.slice(0, 6)} t={t} language={isThaiCopy(t) ? "th" : "en"} />
-      <ImportDetails t={t} result={result} sensitiveHits={[]} progress={t.states.parsed} />
+    </div>
+  );
+}
+
+function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
+  const detected = result.commandBlocks;
+  const detectedText = new Set(detected.flatMap(block => [block.rawCommand.toLowerCase(), block.command.toLowerCase()]));
+  const missing = recommendedCollection.filter(command => !detectedText.has(command.toLowerCase()));
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <Card>
+        <CardHeader>
+          <CardTitle>{t.panels.detectedCommands} ({detected.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DataTable headers={[t.table.command, t.table.status]}>
+            {detected.map(block => (
+              <TableRow key={block.id}>
+                <TableCell className="font-mono">{block.rawCommand}</TableCell>
+                <TableCell>
+                  <Badge severity={block.parsed ? "Passed" : "Low"}>{block.parsed ? t.states.parsed : block.warning}</Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+          </DataTable>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t.panels.notDetected}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <pre className="max-h-[420px] overflow-auto rounded-md bg-muted p-4 text-xs leading-5 text-cyan-100/80">{missing.join("\n") || "-"}</pre>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -975,10 +984,6 @@ function tabCount(view: ViewId, result: AnalysisResult | null, criticalCount: nu
     settings: criticalCount
   };
   return counts[view] ?? 0;
-}
-
-function shortTabLabel(label: string) {
-  return label.length > 12 ? label.split(" ")[0] : label;
 }
 
 function translateSeverity(severity: Severity, t: Copy) {

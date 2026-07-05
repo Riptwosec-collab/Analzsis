@@ -205,10 +205,21 @@ function parseRunningConfig(block: CommandBlock, dataset: ParsedDataset) {
     if (currentInterface) {
       const ip = text.match(/^ip address\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)(?:\s+secondary)?/i);
       if (ip) {
-        currentInterface.ip = ip[1];
-        currentInterface.prefix = maskToPrefix(ip[2]) ?? undefined;
-        currentInterface.mode = "routed";
-        currentInterface.evidence.push(makeEvidence(block, line));
+        const evidence = makeEvidence(block, line);
+        if (currentInterface.ip) {
+          dataset.interfaces.push({
+            ...currentInterface,
+            ip: ip[1],
+            prefix: maskToPrefix(ip[2]) ?? undefined,
+            mode: "routed",
+            evidence: [...currentInterface.evidence, evidence]
+          });
+        } else {
+          currentInterface.ip = ip[1];
+          currentInterface.prefix = maskToPrefix(ip[2]) ?? undefined;
+          currentInterface.mode = "routed";
+          currentInterface.evidence.push(evidence);
+        }
       }
       const access = text.match(/^switchport access vlan\s+(\d+)/i);
       if (access) {

@@ -162,7 +162,7 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
 
   const arpIps = new Set(dataset.arp.map(record => record.ip));
   for (const subnet of subnets) {
-    if (subnet.prefix < 24 || subnet.prefix > 30) continue;
+    if (subnet.prefix < 20 || subnet.prefix > 30) continue;
     const start = ipToNumber(subnet.firstHost);
     const end = ipToNumber(subnet.lastHost);
     if (start === null || end === null) continue;
