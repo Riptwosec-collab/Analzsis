@@ -10,7 +10,7 @@ export function parseCli(input: string): ParsedDataset {
   const parsedBlocks = blocks.map(block => parseBlock(block, dataset));
 
   dataset.commandBlocks = parsedBlocks;
-  dataset.devices = collectDevices(parsedBlocks);
+  dataset.devices = collectDevices(parsedBlocks, dataset.devices);
   dataset.parserWarnings = parsedBlocks.filter(block => !block.parsed).map((block, index): Finding => ({
     id: `parser-${index}`,
     severity: "Low",
@@ -20,8 +20,8 @@ export function parseCli(input: string): ParsedDataset {
     description: `No parser is available yet for "${block.rawCommand}". The block is kept as evidence but is not used for correlation.`,
     confidence: 100,
     evidence: block.lines.slice(0, 3),
-    recommendation: "Add a parser module or paste a supported command for this device.",
-    verificationCommands: ["show ip arp", "show mac address-table", "show ip dhcp binding"]
+    recommendation: "Use a supported command or add a vendor-specific parser fixture for this exact output format.",
+    verificationCommands: ["show ip arp", "show mac address-table", "show ip dhcp binding", "show running-config"]
   }));
 
   return dataset;
@@ -32,13 +32,30 @@ export function analyzeCli(input: string): AnalysisResult {
   return correlate(dataset);
 }
 
-function collectDevices(blocks: ParsedDataset["commandBlocks"]): DeviceRecord[] {
+function collectDevices(blocks: ParsedDataset["commandBlocks"], parsedDevices: DeviceRecord[]): DeviceRecord[] {
   const map = new Map<string, DeviceRecord>();
-  for (const block of blocks) {
-    const existing = map.get(block.device) ?? { hostname: block.device, vendor: block.vendor, commands: [] };
-    if (!existing.commands.includes(block.command)) existing.commands.push(block.command);
-    if (existing.vendor === "generic" && block.vendor !== "generic") existing.vendor = block.vendor;
-    map.set(block.device, existing);
+
+  for (const device of parsedDevices) {
+    map.set(device.hostname, { ...device, commands: [...device.commands] });
   }
+
+  for (const block of blocks) {
+    const existing = map.get(block.device) ?? parsedDevices.find(device => device.hostname !== "IMPORTED-CONFIG") ?? {
+      hostname: block.device,
+      vendor: block.vendor,
+      commands: []
+    };
+    const hostname = existing.hostname === "IMPORTED-CONFIG" && block.device !== "IMPORTED-CONFIG" ? block.device : existing.hostname;
+    const commands = [...existing.commands];
+    if (!commands.includes(block.command)) commands.push(block.command);
+    map.delete(existing.hostname);
+    map.set(hostname, {
+      ...existing,
+      hostname,
+      vendor: existing.vendor === "generic" ? block.vendor : existing.vendor,
+      commands
+    });
+  }
+
   return [...map.values()];
 }
