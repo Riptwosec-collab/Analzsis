@@ -238,7 +238,7 @@ function buildSubnetModel(subnet: SubnetRecord, result: AnalysisResult, language
   const inventory = result.ipInventory.filter(row => ipInSubnet(row.ip, subnet.network, subnet.prefix));
   const arp = result.arp.filter(row => ipInSubnet(row.ip, subnet.network, subnet.prefix));
   const bindings = result.dhcpBindings.filter(row => ipInSubnet(row.ip, subnet.network, subnet.prefix));
-  const dynamicPools = result.dhcpPools.filter(pool => pool.network && pool.prefix !== undefined && rangesOverlap(subnet.network, subnet.prefix, pool.network, pool.prefix));
+  const dynamicPools = result.dhcpPools.filter(pool => pool.poolType !== "Reservation" && !pool.host && pool.network && pool.prefix !== undefined && rangesOverlap(subnet.network, subnet.prefix, pool.network, pool.prefix));
   const reservations = result.dhcpPools.filter(pool => pool.host && ipInSubnet(pool.host, subnet.network, subnet.prefix));
   const interfaces = result.interfaces.filter(row => row.ip && ipInSubnet(row.ip, subnet.network, subnet.prefix));
   const gatewayIps = unique([
