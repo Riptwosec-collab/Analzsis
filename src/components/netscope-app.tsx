@@ -40,6 +40,21 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 type Copy = (typeof translations)["en"] | (typeof translations)["th"];
+type MetricFocus =
+  | "devices"
+  | "commands"
+  | "networks"
+  | "usable"
+  | "used"
+  | "free"
+  | "reserved"
+  | "unknown"
+  | "pools"
+  | "posture"
+  | "blocked"
+  | "conflicts"
+  | "score"
+  | "warnings";
 
 const recommendedCollection = [
   "show interfaces switchport",
@@ -74,6 +89,7 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
   const [language, setLanguage] = useState<Language>("th");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
+  const [metricFocus, setMetricFocus] = useState<MetricFocus | null>(null);
   const t = translations[language];
   const sensitiveHits = useMemo(() => scanSensitiveData(cliText), [cliText]);
   const preview = useMemo(() => buildPreview(cliText), [cliText]);
@@ -82,13 +98,20 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
   async function analyze() {
     if (!cliText.trim()) return;
     setBusy(true);
-    setProgress(language === "th" ? "กำลังอ่าน CLI" : "Parsing CLI");
+    setProgress(t.uploadMode);
     try {
       setResult(await runAnalysis(cliText));
       if (activeView === "import") setActiveView("overview");
     } finally {
       setBusy(false);
     }
+  }
+
+  function openMetric(focus: MetricFocus, view: ViewId, nextQuery = "") {
+    setMetricFocus(focus);
+    setQuery(nextQuery);
+    setActiveView(result ? view : "import");
+    window.setTimeout(() => document.getElementById("analysis-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
   return (
@@ -116,25 +139,42 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
             sensitiveHits={sensitiveHits}
             progress={progress}
             preview={preview}
-            onRecommended={() => setActiveView("troubleshooting")}
-            onExport={() => setActiveView("reports")}
+            onRecommended={() => {
+              setMetricFocus(null);
+              setActiveView("troubleshooting");
+            }}
+            onExport={() => {
+              setMetricFocus(null);
+              setActiveView("reports");
+            }}
           />
 
           <AlertBand t={t} />
 
-          <MetricGrid t={t} result={result} preview={preview} />
+          <MetricGrid t={t} result={result} preview={preview} activeFocus={metricFocus} onOpen={openMetric} />
 
           <ControlBand t={t} result={result} query={query} setQuery={setQuery} />
 
-          <TabStrip t={t} activeView={activeView} setActiveView={setActiveView} result={result} criticalCount={criticalCount} />
+          <TabStrip
+            t={t}
+            activeView={activeView}
+            setActiveView={view => {
+              setMetricFocus(null);
+              setActiveView(view);
+            }}
+            result={result}
+            criticalCount={criticalCount}
+          />
 
-          <section className="rounded-[1.35rem] border border-cyan-400/30 bg-[#031128]/80 p-3 shadow-[0_0_42px_rgba(0,217,255,0.16)]">
+          <section id="analysis-detail" className="rounded-[1.35rem] border border-cyan-400/30 bg-[#031128]/80 p-3 shadow-[0_0_42px_rgba(0,217,255,0.16)]">
             {!result && activeView !== "import" ? <EmptyState t={t} onOpenImport={() => setActiveView("import")} /> : null}
             {activeView === "import" ? (
               <ImportDetails t={t} result={result} sensitiveHits={sensitiveHits} progress={progress} />
             ) : null}
             {result && activeView !== "import" ? (
-              <ViewRouter view={activeView} result={result} query={query} setQuery={setQuery} t={t} language={language} />
+              metricFocus
+                ? <MetricDrilldown focus={metricFocus} result={result} t={t} language={language} />
+                : <ViewRouter view={activeView} result={result} query={query} setQuery={setQuery} t={t} language={language} />
             ) : null}
           </section>
         </main>
@@ -315,26 +355,54 @@ function AlertBand({ t }: { t: Copy }) {
   );
 }
 
-function MetricGrid({ t, result, preview }: { t: Copy; result: AnalysisResult | null; preview: Preview }) {
+function MetricGrid({
+  t,
+  result,
+  preview,
+  activeFocus,
+  onOpen
+}: {
+  t: Copy;
+  result: AnalysisResult | null;
+  preview: Preview;
+  activeFocus: MetricFocus | null;
+  onOpen: (focus: MetricFocus, view: ViewId, query?: string) => void;
+}) {
   const values = [
-    [t.metrics.devices, result?.devices.length ?? preview.devices, "cyan"],
-    [t.metrics.commands, result?.commandBlocks.length ?? preview.commands, "cyan"],
-    [t.metrics.networks, result?.subnets.length ?? 0, "cyan"],
-    [t.metrics.usable, result?.subnets.reduce((sum, subnet) => sum + subnet.totalUsable, 0) ?? 0, "cyan"],
-    [t.metrics.used, result?.usedIps.length ?? 0, "green"],
-    [t.metrics.free, result?.freeIps.length ?? 0, "cyan"],
-    [t.metrics.reserved, result?.ipInventory.filter(ip => ip.status === "Reserved").length ?? 0, "purple"],
-    [t.metrics.unknown, result?.ipInventory.filter(ip => ip.status === "Unknown").length ?? 0, "purple"],
-    [t.metrics.pools, result?.dhcpPools.length ?? 0, "cyan"],
-    [t.metrics.posture, result ? `${result.securityChecks.filter(check => check.status === "Passed").length}/${result.securityChecks.length}` : "0/0", "green"],
-    [t.metrics.blocked, result?.blockedDevices.length ?? 0, "red"],
-    [t.metrics.conflicts, result?.findings.length ?? 0, "yellow"],
-    [t.metrics.score, result ? `${result.securityScore}%` : "0%", "cyan"],
-    [t.metrics.warnings, result?.parserWarnings.length ?? 0, "cyan"]
-  ] as const;
+    { focus: "devices", label: t.metrics.devices, value: result?.devices.length ?? preview.devices, tone: "cyan", view: "devices" },
+    { focus: "commands", label: t.metrics.commands, value: result?.commandBlocks.length ?? preview.commands, tone: "cyan", view: "overview" },
+    { focus: "networks", label: t.metrics.networks, value: result?.subnets.length ?? 0, tone: "cyan", view: "ip-inventory" },
+    { focus: "usable", label: t.metrics.usable, value: result?.subnets.reduce((sum, subnet) => sum + subnet.totalUsable, 0) ?? 0, tone: "cyan", view: "ip-inventory" },
+    { focus: "used", label: t.metrics.used, value: result?.usedIps.length ?? 0, tone: "green", view: "used-ip" },
+    { focus: "free", label: t.metrics.free, value: result?.freeIps.length ?? 0, tone: "cyan", view: "free-ip" },
+    { focus: "reserved", label: t.metrics.reserved, value: result?.ipInventory.filter(ip => ip.status === "Reserved").length ?? 0, tone: "purple", view: "ip-inventory", query: "Reserved" },
+    { focus: "unknown", label: t.metrics.unknown, value: result?.ipInventory.filter(ip => ip.status === "Unknown").length ?? 0, tone: "purple", view: "ip-inventory", query: "Unknown" },
+    { focus: "pools", label: t.metrics.pools, value: result?.dhcpPools.length ?? 0, tone: "cyan", view: "overview" },
+    { focus: "posture", label: t.metrics.posture, value: result ? `${result.securityChecks.filter(check => check.status === "Passed").length}/${result.securityChecks.length}` : "0/0", tone: "green", view: "security" },
+    { focus: "blocked", label: t.metrics.blocked, value: result?.blockedDevices.length ?? 0, tone: "red", view: "blocked-devices" },
+    { focus: "conflicts", label: t.metrics.conflicts, value: result?.findings.length ?? 0, tone: "yellow", view: "conflicts" },
+    { focus: "score", label: t.metrics.score, value: result ? `${result.securityScore}%` : "0%", tone: "cyan", view: "security" },
+    { focus: "warnings", label: t.metrics.warnings, value: result?.parserWarnings.length ?? 0, tone: "cyan", view: "conflicts" }
+  ] satisfies {
+    focus: MetricFocus;
+    label: string;
+    value: React.ReactNode;
+    tone: "cyan" | "green" | "yellow" | "purple" | "red";
+    view: ViewId;
+    query?: string;
+  }[];
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-      {values.map(([label, value, tone]) => <MetricCard key={label} label={label} value={value} tone={tone} />)}
+      {values.map(item => (
+        <MetricCard
+          key={item.focus}
+          label={item.label}
+          value={item.value}
+          tone={item.tone}
+          active={activeFocus === item.focus}
+          onClick={() => onOpen(item.focus, item.view, item.query ?? "")}
+        />
+      ))}
     </div>
   );
 }
@@ -586,7 +654,9 @@ function Overview({ result, t }: { result: AnalysisResult; t: Copy }) {
 }
 
 function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
+  const [selectedId, setSelectedId] = useState(result.commandBlocks[0]?.id ?? "");
   const detected = result.commandBlocks;
+  const selected = detected.find(block => block.id === selectedId) ?? detected[0];
   const detectedText = new Set(detected.flatMap(block => [block.rawCommand.toLowerCase(), block.command.toLowerCase()]));
   const missing = recommendedCollection.filter(command => !detectedText.has(command.toLowerCase()));
   return (
@@ -598,7 +668,11 @@ function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
         <CardContent>
           <DataTable headers={[t.table.command, t.table.status]}>
             {detected.map(block => (
-              <TableRow key={block.id}>
+              <TableRow
+                key={block.id}
+                onClick={() => setSelectedId(block.id)}
+                className={cn("cursor-pointer", selected?.id === block.id && "bg-cyan-400/10")}
+              >
                 <TableCell className="font-mono">{block.rawCommand}</TableCell>
                 <TableCell>
                   <Badge severity={block.parsed ? "Passed" : "Low"}>{block.parsed ? t.states.parsed : block.warning}</Badge>
@@ -606,6 +680,18 @@ function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
               </TableRow>
             ))}
           </DataTable>
+          {selected ? (
+            <DetailBlock
+              title={`${detailLabel(t)}: ${selected.rawCommand}`}
+              lines={[
+                `${t.source}: ${selected.device}`,
+                `${t.table.status}: ${selected.parsed ? t.states.parsed : (selected.warning ?? "-")}`,
+                `${t.table.evidence}: ${selected.lines.length}`,
+                "",
+                ...selected.lines.slice(0, 80).map(line => `${line.line}: ${line.text}`)
+              ]}
+            />
+          ) : null}
         </CardContent>
       </Card>
       <Card>
@@ -617,6 +703,132 @@ function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function MetricDrilldown({ focus, result, t, language }: { focus: MetricFocus; result: AnalysisResult; t: Copy; language: Language }) {
+  switch (focus) {
+    case "devices":
+      return <Devices result={result} t={t} />;
+    case "commands":
+      return <CommandCoverage result={result} t={t} />;
+    case "networks":
+    case "usable":
+      return <SubnetTable result={result} t={t} />;
+    case "used":
+      return <IpTable title={t.metrics.used} rows={result.usedIps} query="" setQuery={() => undefined} t={t} />;
+    case "free":
+      return <IpTable title={t.metrics.free} rows={result.freeIps} query="" setQuery={() => undefined} t={t} />;
+    case "reserved":
+      return <IpTable title={t.metrics.reserved} rows={result.ipInventory.filter(row => row.status === "Reserved")} query="" setQuery={() => undefined} t={t} />;
+    case "unknown":
+      return <IpTable title={t.metrics.unknown} rows={result.ipInventory.filter(row => row.status === "Unknown")} query="" setQuery={() => undefined} t={t} />;
+    case "pools":
+      return <DhcpPools result={result} t={t} />;
+    case "posture":
+    case "score":
+      return <Security result={result} t={t} />;
+    case "blocked":
+      return <Findings title={t.metrics.blocked} findings={result.blockedDevices} t={t} language={language} />;
+    case "conflicts":
+      return <Findings title={t.metrics.conflicts} findings={result.findings} t={t} language={language} />;
+    case "warnings":
+      return <Findings title={t.metrics.warnings} findings={result.parserWarnings} t={t} language={language} />;
+    default:
+      return null;
+  }
+}
+
+function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
+  const [selectedCidr, setSelectedCidr] = useState(result.subnets[0]?.cidr ?? "");
+  const selected = result.subnets.find(subnet => subnet.cidr === selectedCidr) ?? result.subnets[0];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t.metrics.networks}</CardTitle>
+        <CardDescription>{result.subnets.length} {t.panels.currentRows}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <DataTable headers={["CIDR", "Network", "First Host", "Last Host", t.metrics.usable, t.metrics.used, t.metrics.free, "%"]}>
+          {result.subnets.map(subnet => (
+            <TableRow
+              key={subnet.cidr}
+              onClick={() => setSelectedCidr(subnet.cidr)}
+              className={cn("cursor-pointer", selected?.cidr === subnet.cidr && "bg-cyan-400/10")}
+            >
+              <TableCell className="font-mono">{subnet.cidr}</TableCell>
+              <TableCell className="font-mono">{subnet.network}</TableCell>
+              <TableCell className="font-mono">{subnet.firstHost}</TableCell>
+              <TableCell className="font-mono">{subnet.lastHost}</TableCell>
+              <TableCell>{subnet.totalUsable}</TableCell>
+              <TableCell>{subnet.used}</TableCell>
+              <TableCell>{subnet.free}</TableCell>
+              <TableCell>{subnet.utilization}%</TableCell>
+            </TableRow>
+          ))}
+        </DataTable>
+        {selected ? (
+          <DetailBlock
+            title={`${detailLabel(t)}: ${selected.cidr}`}
+            lines={[
+              `Network: ${selected.network}/${selected.prefix}`,
+              `Range: ${selected.firstHost} - ${selected.lastHost}`,
+              `${t.metrics.usable}: ${selected.totalUsable}`,
+              `${t.metrics.used}: ${selected.used}`,
+              `${t.metrics.free}: ${selected.free}`,
+              `${t.metrics.score}: ${selected.utilization}%`
+            ]}
+          />
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
+  const [selectedName, setSelectedName] = useState(result.dhcpPools[0]?.name ?? "");
+  const selected = result.dhcpPools.find(pool => pool.name === selectedName) ?? result.dhcpPools[0];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t.metrics.pools}</CardTitle>
+        <CardDescription>{result.dhcpPools.length} {t.panels.currentRows}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <DataTable headers={["Pool", "Network", t.metrics.used, "Total", "%", "Gateway", "DNS"]}>
+          {result.dhcpPools.map(pool => (
+            <TableRow
+              key={pool.name}
+              onClick={() => setSelectedName(pool.name)}
+              className={cn("cursor-pointer", selected?.name === pool.name && "bg-cyan-400/10")}
+            >
+              <TableCell className="font-mono">{pool.name}</TableCell>
+              <TableCell className="font-mono">{pool.network ? `${pool.network}/${pool.prefix ?? "-"}` : "-"}</TableCell>
+              <TableCell>{pool.leased ?? "-"}</TableCell>
+              <TableCell>{pool.total ?? "-"}</TableCell>
+              <TableCell>{pool.utilization ?? "-"}%</TableCell>
+              <TableCell className="font-mono">{pool.defaultRouters.join(", ") || "-"}</TableCell>
+              <TableCell className="font-mono">{pool.dnsServers.join(", ") || "-"}</TableCell>
+            </TableRow>
+          ))}
+        </DataTable>
+        {selected ? (
+          <DetailBlock
+            title={`${detailLabel(t)}: ${selected.name}`}
+            lines={[
+              `Network: ${selected.network ?? "-"}/${selected.prefix ?? "-"}`,
+              `${t.metrics.used}: ${selected.leased ?? "-"}`,
+              `Total: ${selected.total ?? "-"}`,
+              `Utilization: ${selected.utilization ?? "-"}%`,
+              `Gateway: ${selected.defaultRouters.join(", ") || "-"}`,
+              `DNS: ${selected.dnsServers.join(", ") || "-"}`,
+              "",
+              ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
+            ]}
+          />
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -633,6 +845,8 @@ function IpTable({
   setQuery: (query: string) => void;
   t: Copy;
 }) {
+  const [selectedIp, setSelectedIp] = useState(rows[0]?.ip ?? "");
+  const selected = rows.find(row => row.ip === selectedIp) ?? rows[0];
   return (
     <Card>
       <CardHeader>
@@ -648,7 +862,11 @@ function IpTable({
         />
         <DataTable headers={[t.table.ip, t.table.status, t.table.confidence, t.table.mac, t.table.vlan, t.table.ports, t.table.sources]}>
           {rows.slice(0, 500).map(row => (
-            <TableRow key={row.ip}>
+            <TableRow
+              key={row.ip}
+              onClick={() => setSelectedIp(row.ip)}
+              className={cn("cursor-pointer", selected?.ip === row.ip && "bg-cyan-400/10")}
+            >
               <TableCell className="font-mono">{row.ip}</TableCell>
               <TableCell><Badge severity={row.status === "Used" ? "Passed" : row.status === "Likely Free" ? "Low" : "Info"}>{translateIpStatus(row.status, t)}</Badge></TableCell>
               <TableCell>{row.confidence}%</TableCell>
@@ -659,38 +877,76 @@ function IpTable({
             </TableRow>
           ))}
         </DataTable>
+        {selected ? (
+          <DetailBlock
+            title={`${detailLabel(t)}: ${selected.ip}`}
+            lines={[
+              `${t.table.status}: ${translateIpStatus(selected.status, t)}`,
+              `${t.table.confidence}: ${selected.confidence}%`,
+              `${t.table.mac}: ${selected.macs.join(", ") || "-"}`,
+              `${t.table.vlan}: ${selected.vlans.join(", ") || "-"}`,
+              `${t.table.ports}: ${selected.ports.join(", ") || "-"}`,
+              `${t.table.sources}: ${selected.sources.join(", ") || "-"}`,
+              "",
+              ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
+            ]}
+          />
+        ) : null}
       </CardContent>
     </Card>
   );
 }
 
 function Devices({ result, t }: { result: AnalysisResult; t: Copy }) {
+  const [selectedHost, setSelectedHost] = useState(result.devices[0]?.hostname ?? "");
+  const selected = result.devices.find(device => device.hostname === selectedHost) ?? result.devices[0];
   return (
     <Card>
       <CardHeader><CardTitle>{t.tabs.devices}</CardTitle><CardDescription>{t.panels.devices}</CardDescription></CardHeader>
       <CardContent>
         <DataTable headers={[t.table.hostname, t.table.vendor, t.table.commands]}>
           {result.devices.map(device => (
-            <TableRow key={device.hostname}>
+            <TableRow
+              key={device.hostname}
+              onClick={() => setSelectedHost(device.hostname)}
+              className={cn("cursor-pointer", selected?.hostname === device.hostname && "bg-cyan-400/10")}
+            >
               <TableCell className="font-mono">{device.hostname}</TableCell>
               <TableCell>{device.vendor}</TableCell>
               <TableCell>{device.commands.join(", ")}</TableCell>
             </TableRow>
           ))}
         </DataTable>
+        {selected ? (
+          <DetailBlock
+            title={`${detailLabel(t)}: ${selected.hostname}`}
+            lines={[
+              `${t.table.vendor}: ${selected.vendor}`,
+              `OS: ${selected.os ?? "-"}`,
+              `${t.table.commands}:`,
+              ...selected.commands.map(command => `- ${command}`)
+            ]}
+          />
+        ) : null}
       </CardContent>
     </Card>
   );
 }
 
 function Vlans({ result, t }: { result: AnalysisResult; t: Copy }) {
+  const [selectedKey, setSelectedKey] = useState(result.interfaces[0] ? interfaceKey(result.interfaces[0]) : "");
+  const selected = result.interfaces.find(row => interfaceKey(row) === selectedKey) ?? result.interfaces[0];
   return (
     <Card>
       <CardHeader><CardTitle>{t.tabs.vlans}</CardTitle><CardDescription>{t.panels.vlans}</CardDescription></CardHeader>
       <CardContent>
         <DataTable headers={[t.table.interface, t.table.status, t.table.vlan, t.table.mode, t.table.ip]}>
           {result.interfaces.map(row => (
-            <TableRow key={`${row.name}-${row.ip ?? row.vlan ?? ""}`}>
+            <TableRow
+              key={interfaceKey(row)}
+              onClick={() => setSelectedKey(interfaceKey(row))}
+              className={cn("cursor-pointer", selected && interfaceKey(selected) === interfaceKey(row) && "bg-cyan-400/10")}
+            >
               <TableCell className="font-mono">{row.name}</TableCell>
               <TableCell>{row.status ?? "-"}</TableCell>
               <TableCell>{row.vlan ?? "-"}</TableCell>
@@ -699,6 +955,20 @@ function Vlans({ result, t }: { result: AnalysisResult; t: Copy }) {
             </TableRow>
           ))}
         </DataTable>
+        {selected ? (
+          <DetailBlock
+            title={`${detailLabel(t)}: ${selected.name}`}
+            lines={[
+              `${t.table.status}: ${selected.status ?? "-"}`,
+              `${t.table.vlan}: ${selected.vlan ?? "-"}`,
+              `${t.table.mode}: ${selected.mode ?? "-"}`,
+              `${t.table.ip}: ${selected.ip ?? "-"}/${selected.prefix ?? "-"}`,
+              `Description: ${selected.description ?? "-"}`,
+              "",
+              ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
+            ]}
+          />
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -731,6 +1001,8 @@ function Findings({ title, findings, t, language }: { title: string; findings: F
 }
 
 function Security({ result, t }: { result: AnalysisResult; t: Copy }) {
+  const [selectedId, setSelectedId] = useState(result.securityChecks[0]?.id ?? "");
+  const selected = result.securityChecks.find(check => check.id === selectedId) ?? result.securityChecks[0];
   return (
     <div className="space-y-4">
       <MetricCard label={t.metrics.score} value={`${result.securityScore}%`} tone="cyan" />
@@ -739,7 +1011,11 @@ function Security({ result, t }: { result: AnalysisResult; t: Copy }) {
         <CardContent>
           <DataTable headers={[t.table.check, t.table.status, t.table.severity, t.table.evidence, t.table.recommendation]}>
             {result.securityChecks.map((check: SecurityCheck) => (
-              <TableRow key={check.id}>
+              <TableRow
+                key={check.id}
+                onClick={() => setSelectedId(check.id)}
+                className={cn("cursor-pointer", selected?.id === check.id && "bg-cyan-400/10")}
+              >
                 <TableCell>{translateSecurityCheck(check.name, isThaiCopy(t) ? "th" : "en")}</TableCell>
                 <TableCell><Badge severity={check.status === "Passed" ? "Passed" : check.severity}>{translateCheckStatus(check.status, t)}</Badge></TableCell>
                 <TableCell>{translateSeverity(check.severity, t)}</TableCell>
@@ -748,6 +1024,18 @@ function Security({ result, t }: { result: AnalysisResult; t: Copy }) {
               </TableRow>
             ))}
           </DataTable>
+          {selected ? (
+            <DetailBlock
+              title={`${detailLabel(t)}: ${translateSecurityCheck(selected.name, isThaiCopy(t) ? "th" : "en")}`}
+              lines={[
+                `${t.table.status}: ${translateCheckStatus(selected.status, t)}`,
+                `${t.table.severity}: ${translateSeverity(selected.severity, t)}`,
+                `${t.table.recommendation}: ${translateFindingDescription(selected.recommendation, isThaiCopy(t) ? "th" : "en")}`,
+                "",
+                ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
+              ]}
+            />
+          ) : null}
         </CardContent>
       </Card>
     </div>
@@ -856,7 +1144,38 @@ function DataTable({ headers, children }: { headers: string[]; children: React.R
   );
 }
 
-function MetricCard({ label, value, tone = "cyan" }: { label: string; value: React.ReactNode; tone?: "cyan" | "green" | "yellow" | "purple" | "red" }) {
+function DetailBlock({ title, lines }: { title: string; lines: string[] }) {
+  return (
+    <div className="mt-4 rounded-lg border border-cyan-400/25 bg-slate-950/45 p-4">
+      <div className="mb-2 text-sm font-semibold text-cyan-100">{title}</div>
+      <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-5 text-cyan-100/85">
+        {lines.filter(Boolean).join("\n") || "-"}
+      </pre>
+    </div>
+  );
+}
+
+function detailLabel(t: Copy) {
+  return isThaiCopy(t) ? "รายละเอียด" : "Detail";
+}
+
+function interfaceKey(row: { name: string; ip?: string; vlan?: number | string; mode?: string }) {
+  return `${row.name}-${row.ip ?? ""}-${row.vlan ?? ""}-${row.mode ?? ""}`;
+}
+
+function MetricCard({
+  label,
+  value,
+  tone = "cyan",
+  active = false,
+  onClick
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: "cyan" | "green" | "yellow" | "purple" | "red";
+  active?: boolean;
+  onClick?: () => void;
+}) {
   const toneClass = {
     cyan: "text-cyan-300",
     green: "text-emerald-300",
@@ -865,10 +1184,16 @@ function MetricCard({ label, value, tone = "cyan" }: { label: string; value: Rea
     red: "text-red-300"
   }[tone];
   return (
-    <Card className="cyber-metric-card rounded-xl">
-      <CardContent className="p-4">
+    <Card className={cn("cyber-metric-card rounded-xl transition", active && "border-cyan-200 bg-cyan-400/10 shadow-[0_0_24px_rgba(0,217,255,0.22)]")}>
+      <CardContent className="p-0">
+        <button
+          type="button"
+          onClick={onClick}
+          className="group flex h-full min-h-[104px] w-full flex-col items-start rounded-xl p-4 text-left outline-none transition hover:bg-cyan-400/5 focus-visible:ring-2 focus-visible:ring-cyan-300"
+        >
         <div className="text-xs text-muted-foreground">{label}</div>
         <div className={cn("cyber-metric-value mt-2 text-3xl font-semibold", toneClass)}>{value}</div>
+        </button>
       </CardContent>
     </Card>
   );
