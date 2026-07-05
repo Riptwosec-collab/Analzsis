@@ -1,4 +1,5 @@
 import { ConfigurationView } from "@/components/configuration-view";
+import { IpMacAuditPanel } from "@/components/ip-mac-audit-panel";
 import { NetScopeApp } from "@/components/netscope-app";
 import { isViewId } from "@/constants/navigation";
 
@@ -10,5 +11,13 @@ export default async function Page({ searchParams }: { searchParams?: PageSearch
   const params = (await searchParams) ?? {};
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
   const initialView = isViewId(requestedView) ? requestedView : "import";
-  return initialView === "configuration" ? <ConfigurationView /> : <NetScopeApp initialView={initialView} />;
+
+  if (initialView === "configuration") return <ConfigurationView />;
+
+  return (
+    <>
+      <NetScopeApp initialView={initialView} />
+      <IpMacAuditPanel />
+    </>
+  );
 }
