@@ -126,6 +126,7 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       evidence: [...current.evidence, ...(update.evidence ?? [])]
     });
   };
+  const commandSet = new Set(dataset.commandBlocks.filter(block => block.parsed).map(block => block.command));
 
   for (const record of dataset.arp) {
     touch(record.ip, {
@@ -146,6 +147,16 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       ports: record.interfaceName ? [record.interfaceName] : [],
       sources: ["DHCP Binding"],
       evidence: record.evidence
+    });
+  }
+  for (const pool of dataset.dhcpPools) {
+    if (!pool.host) continue;
+    touch(pool.host, {
+      status: "Reserved",
+      confidence: 100,
+      macs: pool.hardwareAddress ? [pool.hardwareAddress] : [],
+      sources: ["DHCP Reservation"],
+      evidence: pool.evidence
     });
   }
   for (const record of dataset.interfaces) {
@@ -179,10 +190,19 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
           });
           continue;
         }
+        if (!hasEnoughEvidenceToCallFree(dataset, commandSet, subnet)) {
+          touch(ip, {
+            status: "Unknown",
+            confidence: 30,
+            sources: ["Insufficient evidence for free-IP decision"],
+            evidence: []
+          });
+          continue;
+        }
         touch(ip, {
           status: "Likely Free",
-          confidence: dataset.arp.length || dataset.dhcpBindings.length ? 65 : 35,
-          sources: ["Subnet gap"],
+          confidence: 60,
+          sources: ["Subnet gap", "No ARP/DHCP/MAC evidence"],
           evidence: []
         });
       }
@@ -197,6 +217,15 @@ function findDynamicPoolForIp(dataset: ParsedDataset, ip: string) {
     if (pool.poolType === "Reservation" || pool.host || !pool.network || pool.prefix === undefined) return false;
     return ipInSubnet(ip, pool.network, pool.prefix);
   });
+}
+
+function hasEnoughEvidenceToCallFree(dataset: ParsedDataset, commandSet: Set<string>, subnet: SubnetRecord): boolean {
+  const hasArp = commandSet.has("show ip arp") || commandSet.has("show arp");
+  const hasDhcpBinding = commandSet.has("show ip dhcp binding") || commandSet.has("show ip dhcp snooping binding") || commandSet.has("show ip source binding");
+  const hasMac = commandSet.has("show mac address-table");
+  const hasSubnetEvidence = dataset.interfaces.some(item => item.ip && item.prefix !== undefined && ipInSubnet(item.ip, subnet.network, subnet.prefix))
+    || dataset.dhcpPools.some(pool => pool.network && pool.prefix !== undefined && ipInSubnet(pool.network, subnet.network, subnet.prefix));
+  return hasSubnetEvidence && hasArp && hasDhcpBinding && hasMac;
 }
 
 function findDuplicateIpFindings(inventory: IpInventoryRecord[]): Finding[] {

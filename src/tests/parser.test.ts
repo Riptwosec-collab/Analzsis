@@ -230,4 +230,24 @@ describe("analysis", () => {
     expect(poolCandidate?.sources).toContain("DHCP Pool range");
     expect(result.freeIps.some(item => item.ip === "10.10.10.30")).toBe(false);
   });
+
+  it("marks DHCP reservation host addresses as reserved", () => {
+    const result = analyzeCli(DHCP_RESERVATION_FRAGMENT);
+    const reservation = result.ipInventory.find(item => item.ip === "10.10.2.51");
+    expect(reservation?.status).toBe("Reserved");
+    expect(reservation?.sources).toContain("DHCP Reservation");
+    expect(result.freeIps.some(item => item.ip === "10.10.2.51")).toBe(false);
+  });
+
+  it("does not call subnet gaps free when ARP DHCP and MAC evidence is incomplete", () => {
+    const result = analyzeCli([
+      "CORE-SW01#show running-config",
+      "interface Vlan30",
+      " ip address 10.30.30.1 255.255.255.0"
+    ].join("\n"));
+    const candidate = result.ipInventory.find(item => item.ip === "10.30.30.10");
+    expect(candidate?.status).toBe("Unknown");
+    expect(candidate?.sources).toContain("Insufficient evidence for free-IP decision");
+    expect(result.freeIps).toHaveLength(0);
+  });
 });

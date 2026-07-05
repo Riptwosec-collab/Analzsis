@@ -326,6 +326,11 @@ function buildProblemLines({
       ? `${row.ip} อยู่ใน DHCP Pool แต่ยังไม่มี ARP/DHCP lease ยืนยัน จึงไม่ถือว่าว่าง`
       : `${row.ip} is inside a DHCP pool but has no ARP/DHCP lease evidence, so it is not treated as free.`);
   }
+  if (row.status === "Unknown" && row.sources.includes("Insufficient evidence for free-IP decision")) {
+    lines.push(language === "th"
+      ? `${row.ip} ยังไม่ถือว่าว่าง เพราะคำสั่งตรวจ ARP/DHCP/MAC หรือ subnet evidence ยังไม่ครบ`
+      : `${row.ip} is not treated as free because ARP/DHCP/MAC or subnet evidence is incomplete.`);
+  }
   if (row.macs.length > 1 || duplicateFinding) {
     lines.push(language === "th"
       ? `${row.ip} มีหลาย MAC หรือมี finding ประเภท duplicate: ${row.macs.join(", ") || relatedFindings.map(item => item.target).filter(Boolean).join(", ")}`
