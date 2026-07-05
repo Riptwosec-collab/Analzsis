@@ -1,5 +1,6 @@
 import type { AnalysisResult, DeviceRecord, Finding, ParsedDataset } from "@/types/network";
 import { correlate } from "@/correlation/ip-correlation";
+import { findConfigurationFindings } from "@/correlation/config-findings";
 import { detectCommandBlocks } from "@/parsers/detector/command-detector";
 import { emptyDataset, parseBlock } from "@/parsers/cisco-ios/parser";
 
@@ -11,7 +12,7 @@ export function parseCli(input: string): ParsedDataset {
 
   dataset.commandBlocks = parsedBlocks;
   dataset.devices = collectDevices(parsedBlocks, dataset.devices);
-  dataset.parserWarnings = parsedBlocks.filter(block => !block.parsed).map((block, index): Finding => ({
+  const unsupported = parsedBlocks.filter(block => !block.parsed).map((block, index): Finding => ({
     id: `parser-${index}`,
     severity: "Low",
     category: "Parser",
@@ -23,6 +24,7 @@ export function parseCli(input: string): ParsedDataset {
     recommendation: "Use a supported command or add a vendor-specific parser fixture for this exact output format.",
     verificationCommands: ["show ip arp", "show mac address-table", "show ip dhcp binding", "show running-config"]
   }));
+  dataset.parserWarnings = [...unsupported, ...findConfigurationFindings(dataset)];
 
   return dataset;
 }
@@ -40,7 +42,8 @@ function collectDevices(blocks: ParsedDataset["commandBlocks"], parsedDevices: D
   }
 
   for (const block of blocks) {
-    const existing = map.get(block.device) ?? parsedDevices.find(device => device.hostname !== "IMPORTED-CONFIG") ?? {
+    const bestParsed = parsedDevices.find(device => device.hostname !== "IMPORTED-CONFIG");
+    const existing = map.get(block.device) ?? bestParsed ?? {
       hostname: block.device,
       vendor: block.vendor,
       commands: []
