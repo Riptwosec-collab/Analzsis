@@ -18,11 +18,11 @@ export function parseCli(input: string): ParsedDataset {
     category: "Parser",
     title: "Unsupported command",
     target: block.rawCommand,
-    description: `No parser is available yet for "${block.rawCommand}". The block is kept as evidence but is not used for correlation.`,
+    description: `Parse status: ${block.parseStatus ?? "unsupported"}. Coverage ${block.coveragePercent ?? 0}% (${block.recognizedLines ?? 0}/${block.totalLines ?? block.lines.length} lines). The block is kept as evidence but is not used for structured correlation.`,
     confidence: 100,
     evidence: block.lines.slice(0, 3),
-    recommendation: "Use a supported command or add a vendor-specific parser fixture for this exact output format.",
-    verificationCommands: ["show ip arp", "show mac address-table", "show ip dhcp binding", "show running-config"]
+    recommendation: block.missingEvidence?.join(" ") || "Add a parser module or paste a supported command for this device.",
+    verificationCommands: block.recommendedFollowUpCommands?.length ? block.recommendedFollowUpCommands : ["show ip arp", "show mac address-table", "show ip dhcp binding"]
   }));
   dataset.parserWarnings = [...unsupported, ...findConfigurationFindings(dataset)];
 

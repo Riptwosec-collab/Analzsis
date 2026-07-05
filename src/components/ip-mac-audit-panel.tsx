@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,16 +10,6 @@ export function IpMacAuditPanel() {
   const result = useAnalysisStore(state => state.result);
   const [selectedIp, setSelectedIp] = useState("");
   const [query, setQuery] = useState("");
-
-  useEffect(() => {
-    if (!result?.ipInventory.length) {
-      setSelectedIp("");
-      return;
-    }
-    if (!result.ipInventory.some(row => row.ip === selectedIp)) {
-      setSelectedIp(result.ipInventory[0]?.ip ?? "");
-    }
-  }, [result, selectedIp]);
 
   const filteredRows = useMemo(() => {
     if (!result) return [];

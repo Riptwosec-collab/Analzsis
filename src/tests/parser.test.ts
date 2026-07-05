@@ -181,6 +181,35 @@ describe("parser", () => {
     expect(result.findings.some(item => item.title === "DHCP default gateway is outside the pool subnet")).toBe(true);
     expect(result.parserCoverage.totalMeaningfulLines).toBeGreaterThan(0);
   });
+
+  it("normalizes common command abbreviations and records coverage", () => {
+    const parsed = parseCli([
+      "CORE-SW01#sh ip int br",
+      "Interface              IP-Address      OK? Method Status                Protocol",
+      "Vlan10                 10.10.10.1      YES manual up                    up",
+      "CORE-SW01#sh run",
+      "interface Vlan20",
+      " ip address 10.10.20.1 255.255.255.0"
+    ].join("\n"));
+    expect(parsed.commandBlocks.map(block => block.command)).toContain("show ip interface brief");
+    expect(parsed.commandBlocks.map(block => block.command)).toContain("show running-config");
+    expect(parsed.commandBlocks.every(block => block.parseStatus === "parsed")).toBe(true);
+    expect(parsed.commandBlocks.every(block => (block.coveragePercent ?? 0) > 0)).toBe(true);
+  });
+
+  it("keeps unsupported commands as evidence with follow-up commands", () => {
+    const parsed = parseCli([
+      "CORE-SW01#show crypto isakmp sa",
+      "IPv4 Crypto ISAKMP SA",
+      "dst             src             state          conn-id status"
+    ].join("\n"));
+    const block = parsed.commandBlocks[0];
+    expect(block.parsed).toBe(false);
+    expect(block.parseStatus).toBe("unsupported");
+    expect(block.lines.length).toBeGreaterThan(0);
+    expect(block.recommendedFollowUpCommands?.length).toBeGreaterThan(0);
+    expect(parsed.parserWarnings[0]?.description).toContain("Coverage");
+  });
 });
 
 describe("analysis", () => {

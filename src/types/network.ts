@@ -1,6 +1,7 @@
 export type Vendor = "cisco" | "aruba" | "fortigate" | "juniper" | "mikrotik" | "generic";
 
 export type Severity = "Critical" | "High" | "Medium" | "Low" | "Info" | "Passed";
+export type CommandParseStatus = "parsed" | "partially-parsed" | "unsupported" | "malformed" | "empty";
 
 export type CommandType =
   | "show ip arp"
@@ -53,6 +54,7 @@ export interface Evidence {
   line: number;
   text: string;
   sourceFile?: string;
+  normalizedText?: string;
 }
 
 export interface DescriptionMetadata {
@@ -71,6 +73,14 @@ export interface CommandBlock {
   startLine: number;
   lines: Evidence[];
   parsed: boolean;
+  parseStatus?: CommandParseStatus;
+  parserVersion?: string;
+  totalLines?: number;
+  recognizedLines?: number;
+  unrecognizedLines?: number;
+  coveragePercent?: number;
+  missingEvidence?: string[];
+  recommendedFollowUpCommands?: string[];
   parser: string;
   warning?: string;
 }

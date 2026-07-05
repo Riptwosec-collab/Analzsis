@@ -237,10 +237,9 @@ function HeroHeader({
 }
 
 function StatusPills({ t, result, preview }: { t: Copy; result: AnalysisResult | null; preview: Preview }) {
-  const now = result ? new Date(result.generatedAt) : new Date();
   const values = [
     { icon: Database, label: t.deviceAnalyzed, value: result?.devices[0]?.hostname ?? preview.firstDevice ?? "-" },
-    { icon: Power, label: t.scanDate, value: now.toLocaleString() },
+    { icon: Power, label: t.scanDate, value: result ? new Date(result.generatedAt).toLocaleString() : "-" },
     { icon: Calendar, label: t.uploadMode, value: result ? t.states.parsed : t.states.ready }
   ];
 
@@ -559,11 +558,12 @@ function ImportDetails({
           <CardDescription>{result?.commandBlocks.length ?? 0} {t.panels.currentRows}</CardDescription>
         </CardHeader>
         <CardContent>
-          <DataTable headers={[t.table.command, t.table.status]}>
+          <DataTable headers={[t.table.command, t.table.status, "Coverage"]}>
             {(result?.commandBlocks ?? []).map(block => (
               <TableRow key={block.id}>
                 <TableCell className="font-mono">{block.rawCommand}</TableCell>
-                <TableCell><Badge severity={block.parsed ? "Passed" : "Low"}>{block.parsed ? t.states.parsed : block.warning}</Badge></TableCell>
+                <TableCell><Badge severity={block.parsed ? "Passed" : "Low"}>{commandStatusLabel(block, t)}</Badge></TableCell>
+                <TableCell>{block.coveragePercent ?? 0}%</TableCell>
               </TableRow>
             ))}
           </DataTable>
@@ -666,7 +666,7 @@ function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
           <CardTitle>{t.panels.detectedCommands} ({detected.length})</CardTitle>
         </CardHeader>
         <CardContent>
-          <DataTable headers={[t.table.command, t.table.status]}>
+          <DataTable headers={[t.table.command, t.table.status, "Coverage", "Lines"]}>
             {detected.map(block => (
               <TableRow
                 key={block.id}
@@ -675,8 +675,10 @@ function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
               >
                 <TableCell className="font-mono">{block.rawCommand}</TableCell>
                 <TableCell>
-                  <Badge severity={block.parsed ? "Passed" : "Low"}>{block.parsed ? t.states.parsed : block.warning}</Badge>
+                  <Badge severity={block.parsed ? "Passed" : "Low"}>{commandStatusLabel(block, t)}</Badge>
                 </TableCell>
+                <TableCell>{block.coveragePercent ?? 0}%</TableCell>
+                <TableCell>{block.recognizedLines ?? 0}/{block.totalLines ?? block.lines.length}</TableCell>
               </TableRow>
             ))}
           </DataTable>
@@ -685,8 +687,14 @@ function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
               title={`${detailLabel(t)}: ${selected.rawCommand}`}
               lines={[
                 `${t.source}: ${selected.device}`,
-                `${t.table.status}: ${selected.parsed ? t.states.parsed : (selected.warning ?? "-")}`,
+                `Parser: ${selected.parser} ${selected.parserVersion ?? ""}`.trim(),
+                `${t.table.status}: ${commandStatusLabel(selected, t)}`,
+                `Coverage: ${selected.coveragePercent ?? 0}%`,
+                `Recognized Lines: ${selected.recognizedLines ?? 0}`,
+                `Unrecognized Lines: ${selected.unrecognizedLines ?? 0}`,
                 `${t.table.evidence}: ${selected.lines.length}`,
+                `Missing Evidence: ${(selected.missingEvidence ?? []).join("; ") || "-"}`,
+                `Recommended Commands: ${(selected.recommendedFollowUpCommands ?? []).join(", ") || "-"}`,
                 "",
                 ...selected.lines.slice(0, 80).map(line => `${line.line}: ${line.text}`)
               ]}
@@ -1157,6 +1165,15 @@ function DetailBlock({ title, lines }: { title: string; lines: string[] }) {
 
 function detailLabel(t: Copy) {
   return isThaiCopy(t) ? "รายละเอียด" : "Detail";
+}
+
+function commandStatusLabel(block: { parseStatus?: string; parsed: boolean; warning?: string }, t: Copy) {
+  if (block.parseStatus === "parsed") return t.states.parsed;
+  if (block.parseStatus === "partially-parsed") return isThaiCopy(t) ? "อ่านได้บางส่วน" : "Partially Parsed";
+  if (block.parseStatus === "unsupported") return isThaiCopy(t) ? "ยังไม่รองรับ Parser" : "Unsupported Parser";
+  if (block.parseStatus === "malformed") return isThaiCopy(t) ? "รูปแบบข้อมูลผิดปกติ" : "Malformed";
+  if (block.parseStatus === "empty") return isThaiCopy(t) ? "ไม่มีข้อมูลในคำสั่ง" : "Empty";
+  return block.parsed ? t.states.parsed : (block.warning ?? "-");
 }
 
 function interfaceKey(row: { name: string; ip?: string; vlan?: number | string; mode?: string }) {

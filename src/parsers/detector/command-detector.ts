@@ -46,15 +46,29 @@ const commandPatterns: Array<[CommandType, RegExp]> = [
 ];
 
 export function normalizeCommand(raw: string): CommandType {
-  let command = raw.trim().replace(/\s+/g, " ");
-  command = command
-    .replace(/^sh\b/i, "show")
-    .replace(/^show\s+int\b/i, "show interfaces")
-    .replace(/^show\s+ip\s+int\b/i, "show ip interface")
-    .replace(/^show\s+mac\s+add\b/i, "show mac address-table")
-    .replace(/^show\s+run\b/i, "show running-config")
-    .replace(/^show\s+spanning\b/i, "show spanning-tree");
+  const command = normalizeRawCommand(raw);
   return commandPatterns.find(([, pattern]) => pattern.test(command))?.[0] ?? "unknown";
+}
+
+export function normalizeRawCommand(raw: string): string {
+  return expandCommandAliases(raw.trim().replace(/\s+/g, " "));
+}
+
+function expandCommandAliases(raw: string): string {
+  let command = raw.replace(/^sh\b/i, "show");
+  command = command.replace(/^show\s+ip\s+int\b/i, "show ip interface");
+  command = command.replace(/^show\s+int\b/i, "show interfaces");
+  command = command.replace(/\bintf\b/i, "interface");
+  command = command.replace(/\bbr(?:ief)?\b/i, "brief");
+  command = command.replace(/\brun(?:ning-config)?\b/i, "running-config");
+  command = command.replace(/\bmac\s+add(?:ress-table)?\b/i, "mac address-table");
+  command = command.replace(/^show\s+spanning\b/i, "show spanning-tree");
+  command = command.replace(/\blog\b/i, "logging");
+  command = command.replace(/\bdesc\b/i, "description");
+  command = command.replace(/\bswitch(?:port)?\b/i, "switchport");
+  command = command.replace(/\btr(?:unk)?\b/i, "trunk");
+  command = command.replace(/\bstat(?:us)?\b/i, "status");
+  return command;
 }
 
 export function detectVendor(text: string): Vendor {
@@ -78,7 +92,7 @@ export function detectCommandBlocks(input: string): CommandBlock[] {
 
     if (prompt && isCommand) {
       if (current) blocks.push(current);
-      const rawCommand = prompt[2].trim();
+      const rawCommand = normalizeRawCommand(prompt[2]);
       const command = normalizeCommand(rawCommand);
       current = {
         id: `${lineNumber}-${prompt[1]}-${command}`,
@@ -89,6 +103,14 @@ export function detectCommandBlocks(input: string): CommandBlock[] {
         startLine: lineNumber,
         lines: [],
         parsed: false,
+        parseStatus: "empty",
+        parserVersion: "cisco-ios@1",
+        totalLines: 0,
+        recognizedLines: 0,
+        unrecognizedLines: 0,
+        coveragePercent: 0,
+        missingEvidence: [],
+        recommendedFollowUpCommands: [],
         parser: command === "unknown" ? "unsupported" : "cisco-ios"
       };
       return;
@@ -106,6 +128,14 @@ export function detectCommandBlocks(input: string): CommandBlock[] {
         startLine: 1,
         lines: [],
         parsed: false,
+        parseStatus: "empty",
+        parserVersion: vendor === "generic" ? "generic@1" : "auto@1",
+        totalLines: 0,
+        recognizedLines: 0,
+        unrecognizedLines: 0,
+        coveragePercent: 0,
+        missingEvidence: [],
+        recommendedFollowUpCommands: [],
         parser: vendor === "generic" ? "generic" : "auto"
       };
     }
@@ -115,7 +145,8 @@ export function detectCommandBlocks(input: string): CommandBlock[] {
         device: current.device,
         command: current.command,
         line: lineNumber,
-        text
+        text,
+        normalizedText: text.trim()
       });
     }
   });
@@ -153,6 +184,7 @@ export function makeEvidence(block: CommandBlock, line: Evidence): Evidence {
     command: block.command,
     line: line.line,
     text: line.text,
-    sourceFile: line.sourceFile
+    sourceFile: line.sourceFile,
+    normalizedText: line.normalizedText ?? line.text.trim()
   };
 }

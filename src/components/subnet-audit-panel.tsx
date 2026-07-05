@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { SubnetCheckDetails } from "@/components/subnet-check-details";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,16 +10,6 @@ export function SubnetAuditPanel() {
   const result = useAnalysisStore(state => state.result);
   const [selectedCidr, setSelectedCidr] = useState("");
   const [query, setQuery] = useState("");
-
-  useEffect(() => {
-    if (!result?.subnets.length) {
-      setSelectedCidr("");
-      return;
-    }
-    if (!result.subnets.some(subnet => subnet.cidr === selectedCidr)) {
-      setSelectedCidr(result.subnets[0]?.cidr ?? "");
-    }
-  }, [result, selectedCidr]);
 
   const filtered = useMemo(() => {
     if (!result) return [];

@@ -17,8 +17,9 @@ test("metric cards drill into real processed data", async ({ page }) => {
   await page.getByRole("button", { name: "\u0e27\u0e34\u0e40\u0e04\u0e23\u0e32\u0e30\u0e2b\u0e4c" }).first().click();
 
   await page.getByRole("button", { name: /\u0e04\u0e33\u0e2a\u0e31\u0e48\u0e07\u0e17\u0e35\u0e48\u0e1e\u0e1a/ }).first().click();
-  await expect(page.getByRole("cell", { name: /show ip interface brief/i })).toBeVisible();
-  await page.getByRole("row", { name: /show ip interface brief/i }).click();
+  const detailRegion = page.locator("#analysis-detail");
+  await expect(detailRegion.getByRole("cell", { name: /show ip interface brief/i }).first()).toBeVisible();
+  await detailRegion.getByRole("row", { name: /show ip interface brief/i }).first().click();
   await expect(page.getByText(/\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14: show ip interface brief/)).toBeVisible();
 
   await page.getByRole("button", { name: /IP \u0e17\u0e35\u0e48\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19/ }).first().click();

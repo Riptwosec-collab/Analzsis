@@ -52,27 +52,27 @@ export function parseBlock(block: CommandBlock, dataset: ParsedDataset): Command
     case "show ip arp":
     case "show arp":
       dataset.arp.push(...parseArp(block));
-      return parsed(block);
+      return parsed(block, "cisco-ios", ["show mac address-table", "show ip dhcp binding"]);
     case "show mac address-table":
       dataset.macTable.push(...parseMacTable(block));
-      return parsed(block);
+      return parsed(block, "cisco-ios", ["show ip arp", "show interfaces status"]);
     case "show ip dhcp binding":
     case "show ip dhcp snooping binding":
     case "show ip source binding":
       dataset.dhcpBindings.push(...parseDhcpBindings(block));
-      return parsed(block);
+      return parsed(block, "cisco-ios", ["show ip arp", "show mac address-table"]);
     case "show ip dhcp pool":
       dataset.dhcpPools.push(...parseDhcpPool(block));
-      return parsed(block);
+      return parsed(block, "cisco-ios", ["show running-config | section ip dhcp"]);
     case "show running-config":
       parseEnhancedRunningConfig(block, dataset);
-      return parsed(block, "cisco-ios-enhanced");
+      return parsed(block, "cisco-ios-enhanced", ["show ip dhcp pool", "show interfaces status", "show vlan brief"]);
     case "show ip interface brief":
       dataset.interfaces.push(...parseIpInterfaceBrief(block));
-      return parsed(block);
+      return parsed(block, "cisco-ios", ["show running-config interface", "show interfaces status"]);
     case "show interfaces status":
       dataset.interfaces.push(...parseInterfaceStatus(block));
-      return parsed(block);
+      return parsed(block, "cisco-ios", ["show interfaces switchport", "show mac address-table"]);
     case "show interfaces description":
       dataset.interfaces.push(...parseInterfaceDescription(block));
       return parsed(block);
@@ -130,12 +130,50 @@ export function parseBlock(block: CommandBlock, dataset: ParsedDataset): Command
       parseOperationalEvidence(block, dataset);
       return parsed(block, "cisco-ios-operational");
     default:
-      return { ...block, parsed: false, warning: `Unsupported command: ${block.rawCommand}` };
+      return withParseMetadata(block, block.lines.length ? "unsupported" : "empty", 0, recommendedForUnsupported(block.rawCommand), [
+        "No structured parser is available yet; raw lines are kept as operational evidence."
+      ]);
   }
 }
 
-function parsed(block: CommandBlock, parser = "cisco-ios"): CommandBlock {
-  return { ...block, parsed: true, parser };
+function parsed(block: CommandBlock, parser = "cisco-ios", recommendedFollowUpCommands: string[] = []): CommandBlock {
+  const meaningfulLines = block.lines.filter(line => line.text.trim() && !/^[-!]+$/.test(line.text.trim())).length;
+  return withParseMetadata(block, block.lines.length ? "parsed" : "empty", meaningfulLines, recommendedFollowUpCommands, [], parser);
+}
+
+function withParseMetadata(
+  block: CommandBlock,
+  parseStatus: NonNullable<CommandBlock["parseStatus"]>,
+  recognizedLines: number,
+  recommendedFollowUpCommands: string[],
+  missingEvidence: string[] = [],
+  parser = block.parser
+): CommandBlock {
+  const totalLines = block.lines.length;
+  const coveragePercent = totalLines ? Math.round((recognizedLines / totalLines) * 100) : 0;
+  return {
+    ...block,
+    parsed: parseStatus === "parsed" || parseStatus === "partially-parsed",
+    parseStatus,
+    parser,
+    parserVersion: block.parserVersion ?? `${parser}@1`,
+    totalLines,
+    recognizedLines,
+    unrecognizedLines: Math.max(0, totalLines - recognizedLines),
+    coveragePercent,
+    missingEvidence,
+    recommendedFollowUpCommands,
+    warning: parseStatus === "unsupported" ? `Unsupported command: ${block.rawCommand}` : block.warning
+  };
+}
+
+function recommendedForUnsupported(rawCommand: string): string[] {
+  if (/dhcp/i.test(rawCommand)) return ["show ip dhcp binding", "show ip dhcp pool", "show running-config | section ip dhcp"];
+  if (/mac/i.test(rawCommand)) return ["show mac address-table", "show ip arp"];
+  if (/interface|port|trunk|switchport/i.test(rawCommand)) return ["show interfaces status", "show interfaces switchport", "show running-config interface"];
+  if (/spanning|stp/i.test(rawCommand)) return ["show spanning-tree detail", "show spanning-tree inconsistentports"];
+  if (/security|auth|dot1x|access/i.test(rawCommand)) return ["show authentication sessions", "show access-lists", "show running-config"];
+  return ["show running-config", "show logging", "show version"];
 }
 
 function parseArp(block: CommandBlock): ArpRecord[] {
