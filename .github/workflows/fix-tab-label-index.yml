@@ -1,0 +1,48 @@
+name: Fix tab label indexing
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch typed tab label lookup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/components/netscope-app.tsx')
+          text = path.read_text(encoding='utf-8')
+          old = '{t.tabs[item.id]} {count > 0 ?'
+          new = '{(t.tabs as Record<ViewId, string>)[item.id] ?? item.label} {count > 0 ?'
+
+          if new in text:
+              raise SystemExit(0)
+          if old not in text:
+              raise SystemExit('Expected tab label expression was not found')
+
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/netscope-app.tsx
+          git commit -m "fix(ui): use typed fallback for tab labels"
+          git push
