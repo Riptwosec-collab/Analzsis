@@ -1339,7 +1339,8 @@ function translateCheckStatus(status: SecurityCheck["status"], t: Copy) {
     Passed: "ผ่าน",
     Failed: "ไม่ผ่าน",
     Warning: "เตือน",
-    Unknown: "ไม่ทราบ"
+    Unknown: "ไม่ทราบ",
+    "Not Applicable": "ไม่เกี่ยวข้อง"
   }[status];
 }
 
