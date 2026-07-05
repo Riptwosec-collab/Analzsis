@@ -1,15 +1,18 @@
 import {
   AlertTriangle,
   Blocks,
+  FileDown,
   Gauge,
   GitBranch,
   HardDrive,
   Import,
+  ListChecks,
   Network,
   Router,
   Search,
   ShieldCheck,
-  Split
+  Split,
+  Wrench
 } from "lucide-react";
 
 export const VIEW_IDS = [
@@ -35,9 +38,7 @@ export function isViewId(value: string | undefined): value is ViewId {
   return Boolean(value && (VIEW_IDS as readonly string[]).includes(value));
 }
 
-// All visible analysis sections now open inside the same root page.
-// Troubleshooting, Reports, and Settings remain available internally,
-// but are intentionally removed from the sidebar as requested.
+// All visible analysis sections open inside the same root page.
 export const NAV_ITEMS = [
   { id: "overview", href: "/?view=overview", label: "Overview", icon: Gauge },
   { id: "import", href: "/?view=import", label: "CLI Import", icon: Import },
@@ -49,5 +50,8 @@ export const NAV_ITEMS = [
   { id: "conflicts", href: "/?view=conflicts", label: "Conflicts", icon: AlertTriangle },
   { id: "security", href: "/?view=security", label: "Security", icon: ShieldCheck },
   { id: "blocked-devices", href: "/?view=blocked-devices", label: "Blocked Devices", icon: Blocks },
-  { id: "topology", href: "/?view=topology", label: "Topology", icon: GitBranch }
+  { id: "topology", href: "/?view=topology", label: "Topology", icon: GitBranch },
+  { id: "troubleshooting", href: "/?view=troubleshooting", label: "Troubleshooting", icon: Wrench },
+  { id: "reports", href: "/?view=reports", label: "Reports", icon: FileDown },
+  { id: "settings", href: "/?view=settings", label: "Settings", icon: ListChecks }
 ] as const;

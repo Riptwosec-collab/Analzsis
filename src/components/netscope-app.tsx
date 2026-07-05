@@ -1,7 +1,5 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ReactFlow, Background, Controls, type Edge, type Node } from "@xyflow/react";
 import {
@@ -34,14 +32,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export function NetScopeApp({ initialView }: { initialView: ViewId }) {
-  const pathname = usePathname();
   const { theme, setTheme } = useTheme();
   const { cliText, result, progress, setCliText, setResult, setProgress, clear } = useAnalysisStore();
+  const [activeView, setActiveView] = useState<ViewId>(initialView);
   const [language, setLanguage] = useState<"en" | "th">("en");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const t = translations[language];
-  const currentView = routeToView(pathname, initialView);
   const criticalCount = result?.findings.filter(finding => finding.severity === "Critical").length ?? 0;
 
   async function analyze() {
@@ -69,14 +66,15 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
         </div>
         <nav className="space-y-1 p-3">
           {NAV_ITEMS.map(item => {
-            const active = routeToView(pathname, initialView) === item.id;
+            const active = activeView === item.id;
             const Icon = item.icon;
             return (
-              <Link
+              <button
                 key={item.id}
-                href={item.href}
+                type="button"
+                onClick={() => setActiveView(item.id)}
                 className={cn(
-                  "flex items-center justify-between rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                  "flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                   active && "bg-accent text-accent-foreground"
                 )}
               >
@@ -85,7 +83,7 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
                   {item.label}
                 </span>
                 {item.id === "conflicts" && criticalCount > 0 ? <Badge severity="Critical">{criticalCount}</Badge> : null}
-              </Link>
+              </button>
             );
           })}
         </nav>
@@ -135,7 +133,20 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
             </CardContent>
           </Card>
 
-          {currentView === "import" ? (
+          <div className="flex gap-2 overflow-x-auto lg:hidden">
+            {NAV_ITEMS.map(item => (
+              <Button
+                key={item.id}
+                size="sm"
+                variant={activeView === item.id ? "default" : "outline"}
+                onClick={() => setActiveView(item.id)}
+              >
+                {item.label}
+              </Button>
+            ))}
+          </div>
+
+          {activeView === "import" ? (
             <ImportView
               cliText={cliText}
               setCliText={setCliText}
@@ -146,8 +157,8 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
             />
           ) : null}
 
-          {!result && currentView !== "import" ? <EmptyState /> : null}
-          {result ? <ViewRouter view={currentView} result={result} query={query} setQuery={setQuery} /> : null}
+          {!result && activeView !== "import" ? <EmptyState onOpenImport={() => setActiveView("import")} /> : null}
+          {result ? <ViewRouter view={activeView} result={result} query={query} setQuery={setQuery} /> : null}
         </div>
       </main>
     </div>
@@ -572,14 +583,14 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   );
 }
 
-function EmptyState() {
+function EmptyState({ onOpenImport }: { onOpenImport: () => void }) {
   return (
     <Card>
       <CardContent className="flex min-h-80 flex-col items-center justify-center gap-3 text-center">
         <CheckCircle2 className="h-10 w-10 text-muted-foreground" />
         <div className="text-lg font-semibold">Paste CLI or load demo data to begin</div>
         <p className="max-w-xl text-sm text-muted-foreground">The dashboard only shows data derived from current CLI input. Use CLI Import to analyze router, switch, firewall, or controller output.</p>
-        <Button asChild><Link href="/import">Open CLI Import</Link></Button>
+        <Button onClick={onOpenImport}>Open CLI Import</Button>
       </CardContent>
     </Card>
   );
@@ -612,11 +623,6 @@ function filterInventory(rows: IpInventoryRecord[], query: string) {
   if (!query.trim()) return rows;
   const q = query.toLowerCase();
   return rows.filter(row => [row.ip, row.status, ...row.macs, ...row.ports, ...row.sources, ...row.vlans.map(String)].join(" ").toLowerCase().includes(q));
-}
-
-function routeToView(pathname: string, fallback: ViewId): ViewId {
-  const match = NAV_ITEMS.find(item => item.href === pathname);
-  return match?.id ?? fallback;
 }
 
 async function runAnalysis(text: string): Promise<AnalysisResult> {

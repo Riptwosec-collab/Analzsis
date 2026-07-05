@@ -12,7 +12,7 @@ export default async function Page({
 }) {
   const params = (await searchParams) ?? {};
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
-  const initialView = isViewId(requestedView) ? requestedView : "overview";
+  const initialView = isViewId(requestedView) ? requestedView : "import";
 
   return <NetScopeApp initialView={initialView} />;
 }
