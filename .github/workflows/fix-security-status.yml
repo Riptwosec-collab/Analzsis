@@ -1,0 +1,51 @@
+name: Fix security status translation
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch missing Thai status translation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/components/netscope-app.tsx')
+          text = path.read_text(encoding='utf-8')
+          old = '''  return {
+              Passed: "ผ่าน",
+              Failed: "ไม่ผ่าน",
+              Warning: "เตือน",
+              Unknown: "ไม่ทราบ"
+            }[status];'''
+          new = '''  return {
+              Passed: "ผ่าน",
+              Failed: "ไม่ผ่าน",
+              Warning: "เตือน",
+              Unknown: "ไม่ทราบ",
+              "Not Applicable": "ไม่เกี่ยวข้อง"
+            }[status];'''
+          if old not in text:
+              raise SystemExit('Expected translateCheckStatus block was not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/netscope-app.tsx
+          git commit -m "fix(ui): translate Not Applicable security status"
+          git push
