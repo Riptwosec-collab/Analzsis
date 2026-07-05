@@ -1,0 +1,2632 @@
+<!DOCTYPE html>
+<html lang="th" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart IP, DHCP &amp; Security Analyzer</title>
+<style>
+/* ============================================================
+   THEME VARIABLES
+   ============================================================ */
+:root{
+  --bg:#070b16; --bg2:#0a1122; --card:#0e1830; --card2:#111f3d;
+  --glass:rgba(18,32,60,.55); --border:rgba(56,189,248,.22);
+  --border-strong:rgba(56,189,248,.45);
+  --txt:#e6edf7; --muted:#93a4c2; --faint:#5f7291;
+  --cyan:#22d3ee; --blue:#3b82f6; --purple:#a855f7;
+  --green:#22c55e; --yellow:#eab308; --red:#ef4444; --gray:#64748b;
+  --mono:ui-monospace,"SF Mono","Cascadia Code","Consolas",monospace;
+  --sans:"Inter","Segoe UI",system-ui,-apple-system,sans-serif;
+  --glow:0 0 18px rgba(34,211,238,.15);
+  --radius:14px;
+}
+[data-theme="light"]{
+  --bg:#eef2f9; --bg2:#e4ebf6; --card:#ffffff; --card2:#f4f7fc;
+  --glass:rgba(255,255,255,.7); --border:rgba(37,99,235,.2);
+  --border-strong:rgba(37,99,235,.4);
+  --txt:#0f1e35; --muted:#42546f; --faint:#7386a3;
+  --glow:0 0 14px rgba(37,99,235,.08);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--sans); background:
+    radial-gradient(1200px 600px at 12% -10%,rgba(59,130,246,.14),transparent 60%),
+    radial-gradient(1000px 500px at 100% 0%,rgba(168,85,247,.12),transparent 55%),
+    var(--bg);
+  color:var(--txt); min-height:100vh; line-height:1.5; font-size:14px;
+}
+.mono{font-family:var(--mono)}
+a{color:var(--cyan)}
+button{font-family:inherit}
+::selection{background:rgba(34,211,238,.3)}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.wrap{max-width:1400px;margin:0 auto;padding:20px}
+header.app{display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-bottom:18px}
+.logo{width:46px;height:46px;flex:0 0 auto;border-radius:12px;
+  background:linear-gradient(135deg,rgba(34,211,238,.25),rgba(168,85,247,.25));
+  border:1px solid var(--border-strong);display:grid;place-items:center;box-shadow:var(--glow)}
+.logo svg{width:26px;height:26px}
+.htitle{flex:1 1 320px;min-width:240px}
+.htitle h1{margin:0;font-size:20px;font-weight:700;letter-spacing:.2px}
+.htitle p{margin:4px 0 0;color:var(--muted);font-size:12.5px;max-width:760px}
+.hactions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.badges{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 16px}
+.badge{font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);
+  background:var(--glass);color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:var(--cyan)}
+.badge.b-green .dot{background:var(--green)} .badge.b-purple .dot{background:var(--purple)}
+.badge.b-blue .dot{background:var(--blue)}
+
+/* ============================================================
+   CARDS / GLASS
+   ============================================================ */
+.card{background:var(--glass);border:1px solid var(--border);border-radius:var(--radius);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:var(--glow);padding:16px}
+.card h2{margin:0 0 12px;font-size:15px;display:flex;align-items:center;gap:8px}
+.card h2 svg{width:18px;height:18px;color:var(--cyan)}
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+.btn{cursor:pointer;border:1px solid var(--border);background:var(--card2);color:var(--txt);
+  padding:8px 13px;border-radius:10px;font-size:12.5px;display:inline-flex;align-items:center;gap:7px;
+  transition:.15s border-color,.15s background,.15s transform}
+.btn svg{width:15px;height:15px}
+.btn:hover{border-color:var(--border-strong);background:var(--card)}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.btn.primary{background:linear-gradient(135deg,rgba(34,211,238,.9),rgba(59,130,246,.9));color:#04121f;border-color:transparent;font-weight:600}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent}
+.btn.sm{padding:5px 9px;font-size:11.5px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.icon-btn{cursor:pointer;border:1px solid var(--border);background:var(--card2);color:var(--txt);
+  width:36px;height:36px;border-radius:10px;display:grid;place-items:center}
+.icon-btn:hover{border-color:var(--border-strong)}
+.icon-btn svg{width:18px;height:18px}
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+textarea,input,select{font-family:inherit;color:var(--txt);background:var(--bg2);
+  border:1px solid var(--border);border-radius:10px;padding:9px 11px;font-size:13px;width:100%}
+textarea{min-height:190px;resize:vertical;font-family:var(--mono);font-size:12.5px;line-height:1.55}
+textarea:focus,input:focus,select:focus{outline:none;border-color:var(--border-strong);box-shadow:0 0 0 3px rgba(34,211,238,.12)}
+.dropzone{border:1px dashed var(--border-strong);border-radius:12px;padding:2px;transition:.15s}
+.dropzone.drag{background:rgba(34,211,238,.08);border-color:var(--cyan)}
+.input-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.input-stats{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px;font-size:12px;color:var(--muted)}
+.input-stats b{color:var(--cyan);font-family:var(--mono)}
+
+/* ============================================================
+   SUMMARY GRID
+   ============================================================ */
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:16px 0}
+.scard{background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:13px 14px;cursor:pointer;transition:.15s}
+.scard:hover{border-color:var(--border-strong);transform:translateY(-2px)}
+.scard .lbl{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.scard .val{font-size:26px;font-weight:700;font-family:var(--mono);margin-top:6px}
+.scard.c-green .val{color:var(--green)} .scard.c-cyan .val{color:var(--cyan)}
+.scard.c-purple .val{color:var(--purple)} .scard.c-yellow .val{color:var(--yellow)}
+.scard.c-red .val{color:var(--red)} .scard.c-gray .val{color:var(--muted)}
+.scard.c-blue .val{color:var(--blue)}
+
+/* ============================================================
+   TABS
+   ============================================================ */
+.tabbar{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--border);margin-bottom:14px;padding-bottom:2px}
+.tab{cursor:pointer;border:none;background:transparent;color:var(--muted);padding:10px 13px;font-size:13px;
+  border-bottom:2px solid transparent;white-space:nowrap;display:flex;align-items:center;gap:7px}
+.tab:hover{color:var(--txt)}
+.tab.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+.tab .cnt{font-size:10.5px;background:var(--card2);border:1px solid var(--border);border-radius:999px;padding:1px 7px;font-family:var(--mono)}
+.tabpane{display:none}
+.tabpane.active{display:block;animation:fade .25s}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+
+/* ============================================================
+   TABLE
+   ============================================================ */
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.toolbar .search{flex:1 1 200px;min-width:150px;position:relative}
+.toolbar .search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--faint)}
+.toolbar .search input{padding-left:32px}
+.tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px;max-height:560px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{position:sticky;top:0;background:var(--card);color:var(--muted);text-align:left;
+  padding:10px 12px;font-weight:600;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;z-index:2}
+thead th:hover{color:var(--txt)}
+thead th .arr{opacity:.5;font-size:9px}
+tbody td{padding:9px 12px;border-bottom:1px solid rgba(120,140,180,.09);vertical-align:top}
+tbody tr:hover{background:rgba(34,211,238,.05)}
+tbody tr.clickable{cursor:pointer}
+td.mono,th.mono{font-family:var(--mono)}
+.pill{font-size:10.5px;padding:2px 8px;border-radius:999px;font-weight:600;white-space:nowrap;display:inline-block;border:1px solid transparent}
+.p-green{background:rgba(34,197,94,.15);color:#4ade80;border-color:rgba(34,197,94,.3)}
+.p-cyan{background:rgba(34,211,238,.15);color:#67e8f9;border-color:rgba(34,211,238,.3)}
+.p-blue{background:rgba(59,130,246,.15);color:#93c5fd;border-color:rgba(59,130,246,.3)}
+.p-purple{background:rgba(168,85,247,.15);color:#d8b4fe;border-color:rgba(168,85,247,.3)}
+.p-yellow{background:rgba(234,179,8,.15);color:#fde047;border-color:rgba(234,179,8,.3)}
+.p-red{background:rgba(239,68,68,.15);color:#fca5a5;border-color:rgba(239,68,68,.3)}
+.p-gray{background:rgba(100,116,139,.18);color:#cbd5e1;border-color:rgba(100,116,139,.3)}
+.pagination{display:flex;gap:6px;align-items:center;justify-content:flex-end;margin-top:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.linkish{color:var(--cyan);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
+
+/* ============================================================
+   EMPTY STATE
+   ============================================================ */
+.empty{text-align:center;padding:48px 20px;color:var(--muted)}
+.empty svg{width:46px;height:46px;color:var(--faint);opacity:.6;margin-bottom:12px}
+.empty h3{margin:0 0 6px;color:var(--txt);font-size:15px;font-weight:600}
+.empty p{margin:0;font-size:13px;max-width:420px;margin-inline:auto}
+
+/* ============================================================
+   DRAWER / MODAL
+   ============================================================ */
+.overlay{position:fixed;inset:0;background:rgba(2,6,16,.6);backdrop-filter:blur(3px);z-index:50;display:none}
+.overlay.show{display:block}
+.drawer{position:fixed;top:0;right:0;height:100%;width:min(520px,94vw);background:var(--card);
+  border-left:1px solid var(--border-strong);z-index:51;transform:translateX(100%);transition:transform .28s;
+  overflow-y:auto;padding:20px;box-shadow:-8px 0 30px rgba(0,0,0,.4)}
+.drawer.show{transform:translateX(0)}
+.drawer h3{margin:0 0 4px;font-size:16px}
+.drawer .close{position:absolute;top:14px;right:14px}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:6px 12px;margin:14px 0;font-size:12.5px}
+.kv .k{color:var(--muted)} .kv .v{font-family:var(--mono);word-break:break-all}
+.evline{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;margin:8px 0;font-size:12px}
+.evline .meta{color:var(--muted);font-size:11px;margin-bottom:5px;display:flex;gap:10px;flex-wrap:wrap}
+.evline .meta b{color:var(--cyan)}
+.evline pre{margin:0;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;word-break:break-all;color:var(--txt)}
+.evline pre .hl{background:rgba(234,179,8,.25);border-radius:3px}
+
+.modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);z-index:51;
+  width:min(720px,94vw);max-height:88vh;overflow-y:auto;background:var(--card);
+  border:1px solid var(--border-strong);border-radius:16px;padding:22px;display:none;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal.show{display:block;animation:pop .2s forwards}
+@keyframes pop{to{transform:translate(-50%,-50%) scale(1)}}
+.modal h2{margin:0 0 4px}
+.cmdcat{margin:14px 0}
+.cmdcat h4{margin:0 0 6px;font-size:13px;color:var(--cyan)}
+.cmdlist{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-family:var(--mono);font-size:12px}
+.cmdlist label{display:flex;gap:8px;align-items:flex-start;padding:2px 0;cursor:pointer}
+.cmdlist input{width:auto;margin-top:3px}
+
+/* toast */
+.toasts{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:80;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--card);border:1px solid var(--border-strong);border-radius:10px;padding:10px 16px;font-size:13px;
+  box-shadow:0 8px 24px rgba(0,0,0,.4);animation:slideup .2s;display:flex;align-items:center;gap:8px}
+.toast.ok{border-color:rgba(34,197,94,.5)} .toast.err{border-color:rgba(239,68,68,.5)}
+.toast.warn{border-color:rgba(234,179,8,.5)}
+@keyframes slideup{from{opacity:0;transform:translateY(10px)}}
+
+.disclaimer{background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.3);border-radius:12px;padding:12px 14px;font-size:12.5px;color:var(--txt);margin:16px 0;display:flex;gap:10px}
+.disclaimer svg{width:20px;height:20px;color:var(--yellow);flex:0 0 auto;margin-top:1px}
+
+.selector-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0}
+.selector-row label{font-size:12px;color:var(--muted)}
+.selector-row select,.selector-row input{width:auto;min-width:140px}
+
+.subnet-info{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:12px 0}
+.subnet-info .si{background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:8px 10px}
+.subnet-info .si .k{font-size:10.5px;color:var(--muted)}
+.subnet-info .si .v{font-family:var(--mono);font-size:13px;margin-top:2px}
+
+.flow{display:flex;flex-direction:column;align-items:flex-start;gap:2px;font-family:var(--mono);font-size:12px}
+.flow .node{background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:4px 10px}
+.flow .ar{color:var(--faint);padding-left:14px}
+
+.sec-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.sec-card{background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:13px}
+.sec-card h4{margin:0 0 8px;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+.sec-card .det{font-size:11.5px;color:var(--muted);line-height:1.7}
+.sec-card .det span{color:var(--txt);font-family:var(--mono)}
+
+.score-ring{display:flex;align-items:center;gap:16px;margin:6px 0 16px}
+.ring{--p:0;width:90px;height:90px;border-radius:50%;flex:0 0 auto;
+  background:conic-gradient(var(--cyan) calc(var(--p)*1%),rgba(120,140,180,.15) 0);
+  display:grid;place-items:center;position:relative}
+.ring::before{content:"";position:absolute;inset:8px;border-radius:50%;background:var(--card)}
+.ring b{position:relative;font-size:22px;font-family:var(--mono)}
+
+.helpbody h4{color:var(--cyan);margin:14px 0 4px;font-size:13px}
+.helpbody p,.helpbody li{font-size:12.5px;color:var(--muted);line-height:1.7}
+.selftest .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(120,140,180,.1);font-size:12px}
+.selftest .row .mono{font-size:11.5px}
+.pass{color:var(--green)} .fail{color:var(--red)}
+
+@media (max-width:640px){
+  .wrap{padding:12px}
+  .htitle h1{font-size:17px}
+  .kv{grid-template-columns:1fr}
+  .scard .val{font-size:22px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- ======================= HEADER ======================= -->
+  <header class="app">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+        <path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5L19 19M19 5l-2.5 2.5M7.5 16.5L5 19"/>
+        <circle cx="12" cy="12" r="3.2" stroke="var(--cyan)"/>
+      </svg>
+    </div>
+    <div class="htitle">
+      <h1>Smart IP, DHCP &amp; Security Analyzer</h1>
+      <p>วาง ARP, DHCP, MAC Table, Security และ Running Config จาก Router หรือ Switch เพื่อค้นหา IP ที่ใช้งานแล้ว, IP ที่มีโอกาสว่าง, Security Feature, Blocked Client และ Conflict พร้อมหลักฐาน</p>
+    </div>
+    <div class="hactions">
+      <button class="btn ghost sm" id="btnHelp" aria-label="เปิดวิธีใช้งาน">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01"/></svg>Help</button>
+      <button class="btn ghost sm" id="btnExample2" aria-label="โหลดข้อมูลตัวอย่าง">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>Load Example</button>
+      <button class="icon-btn" id="btnTheme" aria-label="สลับธีมสีสว่าง/มืด">
+        <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="badges">
+    <span class="badge b-green"><span class="dot"></span>Client-side Analysis</span>
+    <span class="badge"><span class="dot"></span>Local Only</span>
+    <span class="badge b-blue"><span class="dot"></span>Cisco IOS / IOS-XE</span>
+    <span class="badge b-purple"><span class="dot"></span>No Data Upload</span>
+  </div>
+
+  <!-- ======================= INPUT ======================= -->
+  <div class="card">
+    <h2>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7"/></svg>
+      Paste Router / Switch Output
+    </h2>
+    <div class="dropzone" id="dropzone">
+      <textarea id="input" spellcheck="false" aria-label="ช่องวางผลลัพธ์จากอุปกรณ์" placeholder="วางผลลัพธ์จากอุปกรณ์ที่นี่ เช่น&#10;&#10;CORE-SW01#show ip interface brief&#10;CORE-SW01#show ip arp&#10;CORE-SW01#show ip dhcp binding&#10;CORE-SW01#show mac address-table&#10;CORE-SW01#show port-security&#10;...&#10;&#10;รองรับหลายอุปกรณ์และหลายคำสั่งในช่องเดียว หรือ ลากไฟล์ .txt / .log / .cfg มาวาง"></textarea>
+    </div>
+    <div class="input-actions">
+      <button class="btn primary" id="btnAnalyze" aria-label="เริ่มวิเคราะห์">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>Analyze</button>
+      <button class="btn" id="btnClear" aria-label="ล้างข้อมูล">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>Clear</button>
+      <button class="btn" id="btnExample" aria-label="โหลดข้อมูลตัวอย่าง">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>Load Example</button>
+      <button class="btn" id="btnImport" aria-label="นำเข้าไฟล์ข้อความ">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Import TXT</button>
+      <input type="file" id="fileInput" accept=".txt,.log,.cfg,.conf,.text" style="display:none">
+      <button class="btn" id="btnCmds" aria-label="คัดลอกคำสั่งแนะนำ">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>Recommended Commands</button>
+      <button class="btn" id="btnSaveSnap" aria-label="บันทึก Snapshot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Save Snapshot</button>
+    </div>
+    <div class="input-stats" id="inputStats">
+      <span>Lines: <b id="stLines">0</b></span>
+      <span>Devices detected: <b id="stDevices">0</b></span>
+      <span>Command blocks: <b id="stBlocks">0</b></span>
+      <span>Size: <b id="stSize">0 KB</b></span>
+    </div>
+  </div>
+
+  <div class="disclaimer">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 3.9a2 2 0 00-3.4 0z"/></svg>
+    <span><b>ข้อควรระวัง:</b> IP ที่ไม่พบใน ARP หรือ DHCP ไม่ได้หมายความว่าว่าง 100% อุปกรณ์อาจปิดอยู่, บล็อก ICMP, ใช้ Static IP, อยู่หลังอุปกรณ์อื่น หรือ ARP Entry หมดอายุแล้ว ควรตรวจสอบซ้ำก่อนนำ IP ไปใช้งานจริง เครื่องมือนี้วิเคราะห์จากข้อความที่วางเท่านั้น ไม่สามารถ Ping หรือเชื่อมต่ออุปกรณ์โดยตรง</span>
+  </div>
+
+  <!-- ======================= SUMMARY ======================= -->
+  <div id="summaryZone"></div>
+
+  <!-- Network selector -->
+  <div id="networkZone"></div>
+
+  <!-- ======================= TABS ======================= -->
+  <div class="card" id="resultCard" style="margin-top:16px">
+    <div class="tabbar" id="tabbar"></div>
+    <div id="tabpanes"></div>
+  </div>
+
+  <footer style="margin:24px 0 8px;color:var(--faint);font-size:11.5px;text-align:center">
+    การวิเคราะห์ทั้งหมดทำงานภายในเบราว์เซอร์ของคุณ ไม่มีการส่งข้อมูลออกนอกเครื่อง — Smart IP, DHCP &amp; Security Analyzer
+  </footer>
+</div>
+
+<!-- overlay / drawer / modals -->
+<div class="overlay" id="overlay"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="รายละเอียด">
+  <button class="icon-btn close" id="drawerClose" aria-label="ปิด">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+  </button>
+  <div id="drawerBody"></div>
+</div>
+<div class="modal" id="modal" role="dialog" aria-modal="true">
+  <button class="icon-btn close" id="modalClose" aria-label="ปิด" style="position:absolute;top:14px;right:14px">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+  </button>
+  <div id="modalBody"></div>
+</div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   Smart IP, DHCP & Security Analyzer  —  single-file, client-side only.
+   No backend, no network calls. All parsing/analysis runs in-browser.
+   Architecture: utility objects + parser modules + analysis engine + UI.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   IPv4Utils — subnet math on unsigned 32-bit integers
+   --------------------------------------------------------------------- */
+const IPv4Utils = {
+  isValidIPv4(ip){
+    if(typeof ip!=="string") return false;
+    const m=ip.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if(!m) return false;
+    return m.slice(1).every(o=>{const n=+o;return n>=0&&n<=255&&String(n)===o.replace(/^0+(?=\d)/,"")||(o==="0"&&n===0)?n>=0&&n<=255:n>=0&&n<=255;});
+  },
+  ipToUint32(ip){
+    const p=ip.trim().split(".").map(Number);
+    if(p.length!==4||p.some(n=>isNaN(n)||n<0||n>255)) return null;
+    return (((p[0]<<24)>>>0)+(p[1]<<16)+(p[2]<<8)+p[3])>>>0;
+  },
+  uint32ToIp(n){ n=n>>>0; return [(n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255].join("."); },
+  prefixToMask(prefix){ if(prefix<0||prefix>32)return null; return prefix===0?0:(0xFFFFFFFF<<(32-prefix))>>>0; },
+  maskToPrefix(mask){
+    const n = typeof mask==="string"?this.ipToUint32(mask):mask;
+    if(n===null) return null;
+    // must be contiguous
+    let c=0,seenZero=false;
+    for(let i=31;i>=0;i--){ const bit=(n>>>i)&1; if(bit){ if(seenZero) return null; c++; } else seenZero=true; }
+    return c;
+  },
+  isContiguousMask(mask){ return this.maskToPrefix(mask)!==null; },
+  calculateSubnet(ip, prefix){
+    const u=this.ipToUint32(ip); if(u===null||prefix<0||prefix>32) return null;
+    const mask=this.prefixToMask(prefix);
+    const network=(u & mask)>>>0;
+    const broadcast=(network | (~mask>>>0))>>>0;
+    const total=Math.pow(2,32-prefix);
+    let first,last,usable;
+    if(prefix>=31){ first=network; last=broadcast; usable=prefix===31?2:1; }
+    else { first=(network+1)>>>0; last=(broadcast-1)>>>0; usable=total-2; }
+    return {
+      networkNum:network, broadcastNum:broadcast, prefix, mask,
+      network:this.uint32ToIp(network), broadcast:this.uint32ToIp(broadcast),
+      maskStr:this.uint32ToIp(mask), firstHost:this.uint32ToIp(first), lastHost:this.uint32ToIp(last),
+      firstNum:first, lastNum:last, total, usable,
+      cidr:this.uint32ToIp(network)+"/"+prefix
+    };
+  },
+  isIpInSubnet(ip, network, prefix){
+    const u=this.ipToUint32(ip), nu=this.ipToUint32(network); if(u===null||nu===null) return false;
+    const mask=this.prefixToMask(prefix);
+    return ((u&mask)>>>0)===((nu&mask)>>>0);
+  },
+  compareIp(a,b){ const ua=this.ipToUint32(a),ub=this.ipToUint32(b); if(ua===null||ub===null)return 0; return ua-ub; },
+  expandIpRange(start,end,limit=100000){
+    const s=this.ipToUint32(start),e=this.ipToUint32(end); if(s===null||e===null||e<s) return [];
+    const out=[]; for(let i=s;i<=e && out.length<limit;i++) out.push(this.uint32ToIp(i>>>0)); return out;
+  }
+};
+
+/* ---------------------------------------------------------------------
+   MacUtils — normalize the 3 common Cisco/IEEE MAC notations
+   --------------------------------------------------------------------- */
+const MacUtils = {
+  isValidMac(mac){ return this.normalizeMac(mac)!==null; },
+  normalizeMac(mac){
+    if(typeof mac!=="string") return null;
+    const hex=mac.trim().toLowerCase().replace(/[^0-9a-f]/g,"");
+    if(hex.length!==12) return null;
+    return hex.match(/.{2}/g).join(":");        // canonical aa:bb:cc:dd:ee:ff
+  },
+  toCisco(mac){ const n=this.normalizeMac(mac); if(!n)return null; const h=n.replace(/:/g,""); return h.match(/.{4}/g).join("."); },
+  // client-id like 0100.6c3b.e524.91f8 -> strip leading "01" type byte to a MAC
+  clientIdToMac(cid){
+    // Cisco client-id is a type byte (usually 01) + the MAC, sometimes with a
+    // padding byte; the MAC is always the trailing 12 hex digits.
+    const hex=(cid||"").toLowerCase().replace(/[^0-9a-f]/g,"");
+    if(hex.length===12) return this.normalizeMac(hex);
+    if(hex.length>12 && (hex.startsWith("01")||hex.length===14||hex.length===16)) return this.normalizeMac(hex.slice(-12));
+    return this.normalizeMac(cid);
+  }
+};
+
+/* ---------------------------------------------------------------------
+   Misc helpers
+   --------------------------------------------------------------------- */
+function escapeHtml(s){
+  if(s===null||s===undefined) return "";
+  return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function safe(v){ // never print undefined/NaN/null
+  if(v===null||v===undefined) return "—";
+  if(typeof v==="number"&&isNaN(v)) return "—";
+  const s=String(v).trim(); return s===""?"—":s;
+}
+function debounce(fn,ms=250){ let t; return function(...a){ clearTimeout(t); t=setTimeout(()=>fn.apply(this,a),ms); }; }
+function downloadFile(content, filename, mime="text/plain"){
+  const blob=new Blob([content],{type:mime}); const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function copyToClipboard(text){
+  try{ await navigator.clipboard.writeText(text); return true; }
+  catch(e){
+    try{ const ta=document.createElement("textarea"); ta.value=text; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); return true; }
+    catch(_){ return false; }
+  }
+}
+function showToast(msg,type="ok"){
+  const c=document.getElementById("toasts");
+  const t=document.createElement("div"); t.className="toast "+type; t.textContent=msg;
+  c.appendChild(t); setTimeout(()=>{ t.style.opacity="0"; setTimeout(()=>t.remove(),250); },2600);
+}
+function toCSV(rows){
+  return rows.map(r=>r.map(c=>{ const s=(c===null||c===undefined)?"":String(c);
+    return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(",")).join("\r\n");
+}
+
+/* ---------------------------------------------------------------------
+   CommandDetector — recognise "show ..." command headers and CLI prompts
+   --------------------------------------------------------------------- */
+const CommandDetector = {
+  // map of canonical command -> matcher against a normalized "show ..." string
+  KNOWN:[
+    ["show ip interface brief", /ip\s+int(?:erface)?\s+br(?:ief)?/],
+    ["show interfaces status", /int(?:erfaces?)?\s+status/],
+    ["show interfaces switchport", /int(?:erfaces?)?\s+switchport/],
+    ["show interfaces", /^interfaces?$|^interfaces?\s+\S+$|^int\s/],
+    ["show ip arp", /ip\s+arp/],
+    ["show arp", /^arp\b/],
+    ["show ip dhcp binding", /ip\s+dhcp\s+binding/],
+    ["show ip dhcp pool", /ip\s+dhcp\s+pool/],
+    ["show ip dhcp conflict", /ip\s+dhcp\s+conflict/],
+    ["show ip dhcp snooping binding", /ip\s+dhcp\s+snooping\s+binding/],
+    ["show ip dhcp snooping statistics", /ip\s+dhcp\s+snooping\s+stat/],
+    ["show ip dhcp snooping", /ip\s+dhcp\s+snooping\b/],
+    ["show mac address-table", /mac\s+address-table/],
+    ["show ip arp inspection statistics", /arp\s+inspection\s+stat/],
+    ["show ip arp inspection", /arp\s+inspection/],
+    ["show ip verify source", /ip\s+verify\s+source/],
+    ["show port-security address", /port-security\s+address/],
+    ["show port-security interface", /port-security\s+interface/],
+    ["show port-security", /port-security\b/],
+    ["show interfaces status err-disabled", /status\s+err-?disabled/],
+    ["show errdisable recovery", /errdisable\s+recovery/],
+    ["show interfaces counters errors", /counters?\s+error/],
+    ["show authentication sessions", /authentication\s+sessions?/],
+    ["show access-session", /access-session/],
+    ["show dot1x all", /dot1x\s+all/],
+    ["show mab all", /mab\s+all/],
+    ["show access-lists", /access-lists?/],
+    ["show ip access-lists", /ip\s+access-lists?/],
+    ["show logging", /^logging\b|^log\b/],
+    ["show cdp neighbors detail", /cdp\s+neighbors?\s+det/],
+    ["show lldp neighbors detail", /lldp\s+neighbors?\s+det/],
+    ["show ip route", /ip\s+route/],
+    ["show standby brief", /standby\s+br/],
+    ["show vrrp brief", /vrrp\s+br/],
+    ["show running-config", /running-config|running\b/]
+  ],
+  matchCommand(cmdText){
+    const c=cmdText.toLowerCase().replace(/^sh(?:ow)?\s+/,"").replace(/\s+/g," ").trim();
+    for(const [name,re] of this.KNOWN){ if(re.test(c)) return name; }
+    if(/^running-config|section|include/.test(c)) return "show running-config";
+    return null;
+  }
+};
+
+/* Split pasted text into device/command blocks.
+   Detects prompts like  HOST#command  or  HOST>command  and "show" lines. */
+function detectCommandBlocks(text){
+  const lines=text.replace(/\r/g,"").split("\n");
+  const promptRe=/^([A-Za-z0-9][A-Za-z0-9._\-]{0,62})\s*[#>]\s*(.*)$/;   // HOST#cmd
+  const blocks=[]; let cur=null; let currentDevice="UNKNOWN";
+  for(let i=0;i<lines.length;i++){
+    const raw=lines[i]; const line=raw.replace(/\s+$/,"");
+    const pm=line.match(promptRe);
+    if(pm && (/^(sh|show|dir|term|conf|en|ping|write|copy)/i.test(pm[2].trim())||pm[2].trim()==="")){
+      const dev=pm[1]; const cmd=pm[2].trim();
+      currentDevice=dev;
+      if(cmd && /^sh(ow)?\b|^dir\b/i.test(cmd)){
+        const canon=CommandDetector.matchCommand(cmd);
+        cur={device:dev, rawCommand:cmd, command:canon, startLine:i+1, lines:[], detected:!!canon};
+        blocks.push(cur);
+        continue;
+      } else { cur=null; continue; }   // config/enable prompt line, no output capture
+    }
+    // a bare "show ..." line without prompt starts a block too
+    const bare=line.match(/^\s*(show|sh)\s+(.+)$/i);
+    if(bare && !cur){
+      const canon=CommandDetector.matchCommand(line.trim());
+      cur={device:currentDevice, rawCommand:line.trim(), command:canon, startLine:i+1, lines:[], detected:!!canon};
+      blocks.push(cur); continue;
+    }
+    if(cur){ cur.lines.push({n:i+1, text:raw}); }
+  }
+  return blocks;
+}
+
+/* Classify a single line of headerless output into a command type.
+   Used when the paste has no "HOST#show ..." prompt to anchor blocks. */
+function classifyLine(line){
+  const t=line.trim(); if(!t) return null;
+  // explicit table headers
+  if(/^Protocol\s+Address/i.test(t)) return "show ip arp";
+  if(/^IP address\s+Client-ID/i.test(t)||/^Bindings from all pools/i.test(t)) return "show ip dhcp binding";
+  if(/^(Vlan\s+Mac Address|Mac Address Table)/i.test(t)) return "show mac address-table";
+  if(/^Interface\s+IP-Address/i.test(t)) return "show ip interface brief";
+  if(/^Port\s+(Name\s+)?Status/i.test(t)) return "show interfaces status";
+  // top-level config statements
+  if(/^(interface\s+\S|ip\s+dhcp\b|ip\s+access-list\s|hostname\s|ip\s+route\s|ip\s+source\s+binding|tacacs\s+server|tacacs-server|ip\s+arp\s+inspection|errdisable\s|snmp-server\s|aaa\s)/i.test(t)) return "show running-config";
+  // indented config sub-commands
+  if(/^\s+(host\s+\d|client-identifier\s|hardware-address\s|default-router\s|dns-server\s|network\s+\d|ip\s+address\s+\d|standby\s|vrrp\s|switchport\b|ip\s+dhcp\s+snooping\s+trust|ip\s+helper-address|lease\s|\d+\s+(permit|deny)\b|permit\b|deny\b|address\s+ipv4)/i.test(line)) return "show running-config";
+  // ARP rows (incl. Incomplete)
+  if(IP_RE.test(t) && (/\bARPA\b/i.test(t)||/\bIncomplete\b/i.test(t))) return "show ip arp";
+  // MAC address-table rows
+  if(/^\s*(\d{1,4}|All)\s+[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}\s+(DYNAMIC|STATIC|SECURE)/i.test(line)) return "show mac address-table";
+  // DHCP binding rows: IP + client-id/hardware + Manual/Automatic/Relay
+  if(/^\d+\.\d+\.\d+\.\d+\s+\S/.test(t) && /\b(Manual|Automatic|Relay)\b/i.test(t) && MAC_RE.test(t.replace(/^\d+\.\d+\.\d+\.\d+/,""))) return "show ip dhcp binding";
+  // interface brief rows
+  if(/^(Vlan\d+|Gi\S+|Fa\S+|Te\S+|Lo\d+|Po\d+|Eth\S+|Tu\d+)\s+(\d+\.\d+\.\d+\.\d+|unassigned)\s+(YES|NO)/i.test(t)) return "show ip interface brief";
+  // interface status rows
+  if(/^(Gi\S+|Fa\S+|Te\S+|Eth\S+)\s+.*\b(connected|notconnect|disabled|err-disabled|monitoring)\b/i.test(t)) return "show interfaces status";
+  // syslog
+  if(/%[A-Z0-9_]{2,}-\d?-?[A-Z]/.test(t)) return "show logging";
+  return null;
+}
+
+/* Build synthetic command blocks from headerless output by grouping
+   consecutive lines of the same detected type. Header / blank / data-tail
+   lines that don't classify stay attached to the current block. */
+function sniffBlocks(text, device){
+  const lines=text.replace(/\r/g,"").split("\n");
+  const blocks=[]; let cur=null;
+  for(let i=0;i<lines.length;i++){
+    const cmd=classifyLine(lines[i]);
+    if(cmd){
+      if(!cur||cur.command!==cmd){ cur={device, command:cmd, rawCommand:cmd, startLine:i+1, detected:true, lines:[]}; blocks.push(cur); }
+      cur.lines.push({n:i+1, text:lines[i]});
+    } else if(cur){
+      cur.lines.push({n:i+1, text:lines[i]});   // continuation of current table/section
+    }
+  }
+  return blocks;
+}
+
+/* ---------------------------------------------------------------------
+   Evidence record factory — every parsed fact links back to a source line
+   --------------------------------------------------------------------- */
+function ev(device, command, lineNo, lineText, rule){
+  return {device, command, line:lineNo, text:(lineText||"").trim(), rule:rule||command};
+}
+
+/* =====================================================================
+   PARSERS — each takes a command block and appends normalized records.
+   A record carries its own evidence[] pointing at exact source lines.
+   Every parser is defensive: malformed lines are skipped or warned,
+   never emitted as undefined/NaN.
+   ===================================================================== */
+const IP_RE=/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/;
+const MAC_RE=/\b([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4}|[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}|[0-9a-fA-F]{2}(?:-[0-9a-fA-F]{2}){5})\b/;
+const VLAN_FROM_IFACE=/Vlan(\d+)/i;
+
+const Parsers = {
+  // show ip arp / show arp
+  arp(block, ds){
+    let ok=false;
+    for(const L of block.lines){
+      const t=L.text;
+      if(/^(Protocol|Address|Internet\s+Address)/i.test(t)) continue;
+      const im=t.match(IP_RE), mm=t.match(MAC_RE);
+      if(!im) continue;
+      const ip=im[1];
+      let mac = mm?MacUtils.normalizeMac(mm[1]):null;
+      const incomplete=/incomplete/i.test(t);
+      // age is the token right after ip (number or '-')
+      const ageM=t.match(new RegExp(ip.replace(/\./g,"\\.")+"\\s+(\\S+)"));
+      let age=ageM?ageM[1]:null; if(age==="-")age="-";
+      const ifM=t.match(/(Vlan\d+|Gi\S+|Fa\S+|Te\S+|Eth\S+|Po\d+|Port-channel\d+)\s*$/i);
+      const iface=ifM?ifM[1]:null;
+      const vlanM=iface&&iface.match(VLAN_FROM_IFACE);
+      const vlan=vlanM?+vlanM[1]:null;
+      if(!IPv4Utils.isValidIPv4(ip)){ ds.warnings.push({msg:"IP รูปแบบไม่ถูกต้องใน ARP: "+ip, ev:ev(block.device,block.command,L.n,t)}); continue; }
+      ds.arp.push({ip, mac, age, iface, vlan, incomplete, device:block.device,
+        evidence:[ev(block.device,"show ip arp",L.n,t,"ARP row")]});
+      ok=true;
+    }
+    return ok;
+  },
+  // show ip dhcp binding
+  dhcpBinding(block, ds){
+    let ok=false;
+    for(const L of block.lines){
+      const t=L.text;
+      if(/^(IP address|Bindings|Total|--)/i.test(t.trim())) continue;
+      const im=t.match(IP_RE); if(!im) continue;
+      const ip=im[1]; if(!IPv4Utils.isValidIPv4(ip)) continue;
+      const after=t.slice(t.indexOf(ip)+ip.length).trim();
+      const parts=after.split(/\s+/);
+      const cid=parts[0]||null;
+      const mac=MacUtils.clientIdToMac(cid);
+      // NOTE: "Infinite" is a lease value, not a binding type — exclude it here.
+      const typeM=t.match(/\b(Automatic|Manual|Relay|Static)\b/i);
+      const lease = /\binfinite\b/i.test(t)?"Infinite":(t.match(/\b([A-Z][a-z]{2}\s+\d{1,2}\s+\d{4}\s+\d{1,2}:\d{2}\s*[AP]M)\b/)||[])[1]||null;
+      // operational tables (IOS-XE) add State + Interface columns
+      const stateM=t.match(/\b(Active|Selecting|Requesting|Bound|Released|Expired)\b/i);
+      const ifM=t.match(/\b(Vlan\d+|Gi\S+|Te\S+|Fa\S+|Po\d+|Unknown)\s*$/i);
+      const iface=ifM&&!/^Unknown$/i.test(ifM[1])?ifM[1]:null;
+      const vlanM=iface&&iface.match(VLAN_FROM_IFACE); const vlan=vlanM?+vlanM[1]:null;
+      ds.dhcpBindings.push({ip, mac, clientId:cid, type:typeM?typeM[1]:null, lease,
+        state:stateM?stateM[1]:null, iface, vlan, device:block.device,
+        evidence:[ev(block.device,"show ip dhcp binding",L.n,t,"DHCP binding row")]});
+      ok=true;
+    }
+    return ok;
+  },
+  // show ip dhcp snooping binding
+  snoopBinding(block, ds){
+    let ok=false;
+    for(const L of block.lines){
+      const t=L.text; if(/MacAddress|----|Total/i.test(t)) continue;
+      const im=t.match(IP_RE), mm=t.match(MAC_RE); if(!im||!mm) continue;
+      const vlanM=t.match(/\b(\d{1,4})\b(?=\s+\S*$)/);
+      const ifM=t.match(/(Gi\S+|Fa\S+|Te\S+|Eth\S+|Po\d+)/i);
+      const vM=t.match(/\s(\d{1,4})\s+(?:Gi|Fa|Te|Eth|Po)/i);
+      ds.snoopBindings.push({ip:im[1], mac:MacUtils.normalizeMac(mm[1]),
+        vlan:vM?+vM[1]:null, iface:ifM?ifM[1]:null, lease:(t.match(/\s(\d+)\s/)||[])[1]||null,
+        device:block.device, evidence:[ev(block.device,"show ip dhcp snooping binding",L.n,t,"Snooping binding")]});
+      ok=true;
+    }
+    return ok;
+  },
+  // show ip dhcp conflict
+  dhcpConflict(block, ds){
+    let ok=false;
+    for(const L of block.lines){
+      const t=L.text; if(/^IP address|Detection/i.test(t.trim())) continue;
+      const im=t.match(IP_RE); if(!im) continue;
+      const method=(t.match(/\b(Ping|Gratuitous ARP|Gratuitous)\b/i)||[])[1]||null;
+      ds.dhcpConflicts.push({ip:im[1], method, time:t.slice(t.indexOf(im[1])+im[1].length).replace(method||"","").trim()||null,
+        device:block.device, evidence:[ev(block.device,"show ip dhcp conflict",L.n,t,"DHCP conflict")]});
+      ok=true;
+    }
+    return ok;
+  },
+  // show mac address-table
+  macTable(block, ds){
+    let ok=false;
+    for(const L of block.lines){
+      const t=L.text;
+      if(/Mac Address|----|Total Mac|Multicast|vlan\s+mac/i.test(t)) continue;
+      const mm=t.match(MAC_RE); if(!mm) continue;
+      const vlanM=t.match(/^\s*(\d{1,4}|All)\s+/);
+      const typeM=t.match(/\b(DYNAMIC|STATIC|SECURE|dynamic|static)\b/i);
+      const portM=t.match(/(Gi\S+|Fa\S+|Te\S+|Eth\S+|Po\d+|Port-channel\d+|CPU|Drop|Router)\s*$/i);
+      ds.macTable.push({mac:MacUtils.normalizeMac(mm[1]),
+        vlan:vlanM&&vlanM[1]!=="All"?+vlanM[1]:null, type:typeM?typeM[1].toUpperCase():null,
+        port:portM?portM[1]:null, device:block.device,
+        evidence:[ev(block.device,"show mac address-table",L.n,t,"MAC table row")]});
+      ok=true;
+    }
+    return ok;
+  },
+  // show ip interface brief
+  ipIntBrief(block, ds){
+    let ok=false;
+    for(const L of block.lines){
+      const t=L.text; if(/^Interface\s+IP-Address/i.test(t)) continue;
+      const parts=t.trim().split(/\s+/); if(parts.length<2) continue;
+      const iface=parts[0]; const ip=parts[1];
+      if(!/^(Vlan|Gi|Fa|Te|Eth|Lo|Po|Tu|Se|BVI|Port)/i.test(iface)) continue;
+      const status=(t.match(/\b(up|down|administratively down)\b/i)||[])[0]||null;
+      const rec={iface, device:block.device, status,
+        evidence:[ev(block.device,"show ip interface brief",L.n,t,"Interface")]};
+      if(IPv4Utils.isValidIPv4(ip)){ rec.ip=ip;
+        const vm=iface.match(VLAN_FROM_IFACE); rec.vlan=vm?+vm[1]:null; }
+      ds.interfaces.push(rec);
+      ok=true;
+    }
+    return ok;
+  },
+  // show interfaces status
+  intStatus(block, ds){
+    let ok=false;
+    for(const L of block.lines){
+      const t=L.text; if(/^Port\s+Name|^Port\s+Status/i.test(t)) continue;
+      const pm=t.match(/^(Gi\S+|Fa\S+|Te\S+|Eth\S+|Po\d+)\s+/i); if(!pm) continue;
+      const status=(t.match(/\b(connected|notconnect|disabled|err-disabled|monitoring|faulty|inactive)\b/i)||[])[1]||null;
+      const vlanM=t.match(/\b(\d{1,4}|trunk|routed)\b/i);
+      const speedM=t.match(/\b(a-full|a-half|full|half|auto)\b.*?\b(a-\d+|\d+|auto)\b/i);
+      ds.intStatus.push({port:pm[1], status,
+        vlan:(t.match(/\s(trunk|routed|\d{1,4})\s+(?:auto|a-|full|half|\d)/i)||[])[1]||null,
+        raw:t.trim(), device:block.device,
+        evidence:[ev(block.device,"show interfaces status",L.n,t,"Interface status")]});
+      ok=true;
+    }
+    return ok;
+  },
+  // running-config parsing. Handles: interface IPs (incl. secondary), SVI,
+  // HSRP/VRRP, DHCP pools with BOTH `network` (dynamic) and `host`+`client-identifier`
+  // (reservation), excluded-address, static ARP, ip source binding, ip helper-address,
+  // and in-config security (dhcp snooping, ARP inspection, ACLs, TACACS/AAA, port-security).
+  runningConfig(block, ds){
+    let ok=false, curIface=null, curPool=null, curAcl=null;
+    const dev=block.device; const S=ds.security;
+    for(const L of block.lines){
+      const t=L.text; const line=t.replace(/\s+$/,"");
+      let m;
+      const topLevel=/^\S/.test(line);   // non-indented line = new top-level context
+      if(topLevel && !/^interface\s|^ip\s+dhcp\s+pool\s|^ip\s+access-list\s/i.test(line)){ curIface=null; curPool=null; curAcl=null; }
+
+      // ----- context openers -----
+      if((m=line.match(/^interface\s+(\S+)/i))){ curIface={name:m[1]}; curPool=null; curAcl=null;
+        const vm=m[1].match(VLAN_FROM_IFACE); if(vm)curIface.vlan=+vm[1]; ok=true; continue; }
+      if((m=line.match(/^ip\s+dhcp\s+pool\s+(\S+)/i))){ curPool={name:m[1], line:L.n,
+        evidence:[ev(dev,"show running-config",L.n,t,"DHCP pool")]};
+        ds.dhcpPools.push(curPool); curIface=null; curAcl=null; ok=true; continue; }
+      if((m=line.match(/^ip\s+access-list\s+(standard|extended)\s+(\S+)/i))){
+        curAcl={name:m[2], kind:m[1], permit:0, deny:0, device:dev,
+          evidence:[ev(dev,"show running-config",L.n,t,"ACL")]}; S.acl.detected=true; S.acl.lists.push(curAcl);
+        curIface=null; curPool=null; ok=true; continue; }
+
+      // ----- interface sub-commands -----
+      if(curIface){
+        if((m=line.match(/^\s*ip\s+address\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)(\s+secondary)?/i))){
+          ds.interfaces.push({iface:curIface.name, ip:m[1], mask:m[2], prefix:IPv4Utils.maskToPrefix(m[2]),
+            vlan:curIface.vlan||null, secondary:!!m[3], device:dev, fromConfig:true,
+            evidence:[ev(dev,"show running-config",L.n,t,"SVI/Interface IP")]}); ok=true; continue; }
+        if((m=line.match(/^\s*standby\s+(?:(\d+)\s+)?ip\s+(\d+\.\d+\.\d+\.\d+)/i))){
+          ds.virtualIps.push({ip:m[2], proto:"HSRP", group:m[1]||null, iface:curIface.name, vlan:curIface.vlan||null,
+            device:dev, evidence:[ev(dev,"show running-config",L.n,t,"HSRP VIP")]}); ok=true; continue; }
+        if((m=line.match(/^\s*vrrp\s+(\d+)\s+ip\s+(\d+\.\d+\.\d+\.\d+)/i))){
+          ds.virtualIps.push({ip:m[2], proto:"VRRP", group:m[1], iface:curIface.name, vlan:curIface.vlan||null,
+            device:dev, evidence:[ev(dev,"show running-config",L.n,t,"VRRP VIP")]}); ok=true; continue; }
+        if(/^\s*ip\s+dhcp\s+snooping\s+trust/i.test(line)){ S.dhcpSnooping.detected=true; S.dhcpSnooping.trusted.push(curIface.name);
+          if(!S.dhcpSnooping.evidence)S.dhcpSnooping.evidence=[]; S.dhcpSnooping.evidence.push(ev(dev,"show running-config",L.n,t,"snooping trust")); ok=true; continue; }
+        if((m=line.match(/^\s*ip\s+helper-address\s+(\d+\.\d+\.\d+\.\d+)/i))){
+          (ds.helpers=ds.helpers||[]).push({iface:curIface.name, ip:m[1], device:dev,
+            evidence:[ev(dev,"show running-config",L.n,t,"ip helper-address")]}); ok=true; continue; }
+        if(/^\s*switchport\s+port-security/i.test(line)){ S.portSecurity.detected=true; S.portSecurity.enabled=true;
+          const rec=(S.portSecurity.interfaces.find(x=>x.iface===curIface.name))||{iface:curIface.name,device:dev,violations:0,
+            evidence:[ev(dev,"show running-config",L.n,t,"port-security")]};
+          if(!S.portSecurity.interfaces.includes(rec))S.portSecurity.interfaces.push(rec);
+          if((m=line.match(/maximum\s+(\d+)/i)))rec.max=+m[1];
+          if(/sticky/i.test(line))rec.sticky=true;
+          if((m=line.match(/violation\s+(\S+)/i)))rec.action=m[1]; ok=true; continue; }
+        // capture native / allowed vlan for anomaly checks
+        if((m=line.match(/^\s*switchport\s+trunk\s+native\s+vlan\s+(\d+)/i))){ curIface.nativeVlan=+m[1];
+          (ds.trunks=ds.trunks||[]).push({iface:curIface.name,nativeVlan:+m[1],device:dev,evidence:[ev(dev,"show running-config",L.n,t,"native vlan")]}); ok=true; continue; }
+      }
+
+      // ----- dhcp pool sub-commands -----
+      if(curPool){
+        if((m=line.match(/^\s*network\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+|\/\d+)/i))){
+          curPool.network=m[1]; if(m[2].startsWith("/")) curPool.prefix=+m[2].slice(1);
+          else { curPool.mask=m[2]; curPool.prefix=IPv4Utils.maskToPrefix(m[2]); } curPool.dynamic=true; ok=true; continue; }
+        if((m=line.match(/^\s*host\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+|\/\d+)?/i))){
+          curPool.host=m[1]; curPool.isReservation=true;
+          if(m[2]){ if(m[2].startsWith("/")){curPool.prefix=+m[2].slice(1);} else {curPool.mask=m[2];curPool.prefix=IPv4Utils.maskToPrefix(m[2]);} }
+          // derive the pool subnet from host + mask
+          if(curPool.prefix!=null){ const sub=IPv4Utils.calculateSubnet(m[1],curPool.prefix); if(sub)curPool.network=sub.network; }
+          ok=true; continue; }
+        if((m=line.match(/^\s*client-identifier\s+(\S+)/i))){ curPool.clientId=m[1]; curPool.mac=MacUtils.clientIdToMac(m[1]); ok=true; continue; }
+        if((m=line.match(/^\s*hardware-address\s+(\S+)/i))){ curPool.mac=MacUtils.normalizeMac(m[1]); ok=true; continue; }
+        if((m=line.match(/^\s*default-router\s+(.+)/i))){ curPool.defaultRouter=m[1].trim().split(/\s+/); ok=true; continue; }
+        if((m=line.match(/^\s*dns-server\s+(.+)/i))){ curPool.dns=m[1].trim().split(/\s+/); ok=true; continue; }
+        if((m=line.match(/^\s*lease\s+(.+)/i))){ curPool.lease=m[1].trim(); ok=true; continue; }
+        if((m=line.match(/^\s*domain-name\s+(\S+)/i))){ curPool.domain=m[1]; ok=true; continue; }
+      }
+
+      // ----- ACL entries -----
+      if(curAcl){
+        if(/^\s+\d+\s+remark/i.test(line)){ ok=true; continue; }
+        if(/^\s+(\d+\s+)?permit\b/i.test(line)){ curAcl.permit++; ok=true; continue; }
+        if(/^\s+(\d+\s+)?deny\b/i.test(line)){ curAcl.deny++; ok=true; continue; }
+      }
+
+      // ----- global lines (any indent context) -----
+      // global DHCP snooping enable
+      if((m=line.match(/^\s*ip\s+dhcp\s+snooping\s+vlan\s+([\d,\-\s]+)/i))){ S.dhcpSnooping.detected=true; S.dhcpSnooping.enabled=true;
+        S.dhcpSnooping.vlans=m[1].trim(); (S.dhcpSnooping.evidence=S.dhcpSnooping.evidence||[]).push(ev(dev,"show running-config",L.n,t,"snooping vlan")); ok=true; continue; }
+      if(/^ip\s+dhcp\s+snooping\s*$/i.test(line)){ S.dhcpSnooping.detected=true; S.dhcpSnooping.enabled=true;
+        (S.dhcpSnooping.evidence=S.dhcpSnooping.evidence||[]).push(ev(dev,"show running-config",L.n,t,"snooping enable")); ok=true; continue; }
+      if((m=line.match(/^ip\s+arp\s+inspection\s+vlan\s+([\d,\-\s]+)/i))){ S.dai.detected=true; S.dai.enabled=true;
+        S.dai.vlans.push({vlan:m[1].trim(),status:"Enabled"}); (S.dai.evidence=S.dai.evidence||[]).push(ev(dev,"show running-config",L.n,t,"DAI vlan")); ok=true; continue; }
+      if(/^\s*ip\s+arp\s+inspection\b/i.test(line)){ S.dai.detected=true; (S.dai.evidence=S.dai.evidence||[]).push(ev(dev,"show running-config",L.n,t,"DAI")); ok=true; continue; }
+      // TACACS / AAA
+      if(/^tacacs\s+server\s|^tacacs-server\s+host|^aaa\s+new-model/i.test(line)){ (S.aaa=S.aaa||{detected:false,enabled:false,servers:0,evidence:[]});
+        S.aaa.detected=true; S.aaa.enabled=true; if(/tacacs/i.test(line))S.aaa.servers++; S.aaa.evidence.push(ev(dev,"show running-config",L.n,t,"AAA/TACACS")); ok=true; continue; }
+      // excluded-address (global)
+      if((m=line.match(/^\s*ip\s+dhcp\s+excluded-address\s+(\d+\.\d+\.\d+\.\d+)(?:\s+(\d+\.\d+\.\d+\.\d+))?/i))){
+        ds.excluded.push({start:m[1], end:m[2]||m[1], device:dev,
+          evidence:[ev(dev,"show running-config",L.n,t,"DHCP excluded-address")]}); ok=true; continue; }
+      // static ARP:  arp 10.0.0.1 aabb.ccdd.eeff ARPA
+      if((m=line.match(/^\s*arp\s+(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F.:-]+)\s+ARPA/i))){
+        ds.staticArp.push({ip:m[1], mac:MacUtils.normalizeMac(m[2]), device:dev,
+          evidence:[ev(dev,"show running-config",L.n,t,"Static ARP")]}); ok=true; continue; }
+      // ip source binding
+      if((m=line.match(/^\s*ip\s+source\s+binding\s+([0-9a-fA-F.:-]+)\s+vlan\s+(\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+interface\s+(\S+)/i))){
+        ds.sourceBinding.push({mac:MacUtils.normalizeMac(m[1]), vlan:+m[2], ip:m[3], iface:m[4], device:dev,
+          evidence:[ev(dev,"show running-config",L.n,t,"IP source binding")]}); ok=true; continue; }
+    }
+    return ok;
+  },
+  // standalone excluded-address include output
+  excludedInclude(block, ds){
+    let ok=false;
+    for(const L of block.lines){
+      const m=L.text.match(/ip\s+dhcp\s+excluded-address\s+(\d+\.\d+\.\d+\.\d+)(?:\s+(\d+\.\d+\.\d+\.\d+))?/i);
+      if(m){ ds.excluded.push({start:m[1], end:m[2]||m[1], device:block.device,
+        evidence:[ev(block.device,"show running-config | include excluded-address",L.n,L.text,"DHCP excluded-address")]}); ok=true; }
+    }
+    return ok;
+  },
+  // show ip dhcp pool (operational)
+  dhcpPoolOp(block, ds){
+    let ok=false, cur=null;
+    for(const L of block.lines){
+      const t=L.text; let m;
+      if((m=t.match(/^Pool\s+(\S+)/i))){ cur={name:m[1], op:true, device:block.device,
+        evidence:[ev(block.device,"show ip dhcp pool",L.n,t,"DHCP pool")]}; ds.dhcpPoolOps.push(cur); ok=true; continue; }
+      if(!cur) continue;
+      if((m=t.match(/Total addresses\s*:\s*(\d+)/i))) cur.total=+m[1];
+      else if((m=t.match(/Leased addresses\s*:\s*(\d+)/i))) cur.leased=+m[1];
+      else if((m=t.match(/Excluded addresses\s*:\s*(\d+)/i))) cur.excludedCount=+m[1];
+      else if((m=t.match(/Pending event\s*:\s*(\S+)/i))) cur.pending=m[1];
+      else if((m=t.match(/(\d+\.\d+\.\d+\.\d+)\s*\/\s*(\d+)/))){ cur.subnet=m[1]; cur.prefix=+m[2]; }
+    }
+    return ok;
+  },
+  // Security: dhcp snooping status
+  dhcpSnooping(block, ds){
+    const t=block.lines.map(l=>l.text).join("\n"); const s=ds.security;
+    s.dhcpSnooping.detected=true;
+    const en=/DHCP snooping is (enabled|configured and is not enabled|not configured)/i.exec(t);
+    if(en) s.dhcpSnooping.enabled=/^enabled/i.test(en[1]);
+    else if(/is enabled/i.test(t)) s.dhcpSnooping.enabled=true;
+    const vl=/(?:operational|configured) on following VLANs?:\s*([\d,\-\s]+)/i.exec(t);
+    if(vl) s.dhcpSnooping.vlans=vl[1].trim();
+    for(const L of block.lines){
+      const tm=L.text.match(/^(Gi\S+|Fa\S+|Te\S+|Po\d+)\s+(yes|no)/i);
+      if(tm){ (tm[2].toLowerCase()==="yes"?s.dhcpSnooping.trusted:s.dhcpSnooping.untrusted).push(tm[1]); }
+    }
+    s.dhcpSnooping.evidence=[ev(block.device,block.command,block.startLine,block.rawCommand,"DHCP snooping")];
+    return true;
+  },
+  arpInspection(block, ds){
+    const t=block.lines.map(l=>l.text).join("\n"); const s=ds.security;
+    s.dai.detected=true;
+    for(const L of block.lines){
+      const m=L.text.match(/^\s*(\d{1,4})\s+(Enabled|Disabled|Active|Inactive)/i);
+      if(m){ s.dai.vlans.push({vlan:+m[1], status:m[2]}); if(/enabled|active/i.test(m[2])) s.dai.enabled=true; }
+    }
+    if(/is enabled/i.test(t)) s.dai.enabled=true;
+    const drop=t.match(/Dropped\s*:?\s*(\d+)/i); if(drop) s.dai.dropped=+drop[1];
+    s.dai.evidence=[ev(block.device,block.command,block.startLine,block.rawCommand,"ARP inspection")];
+    return true;
+  },
+  verifySource(block, ds){
+    const s=ds.security; s.ipsg.detected=true;
+    for(const L of block.lines){
+      const m=L.text.match(/^(Gi\S+|Fa\S+|Te\S+)\s+(ip|ip-mac|\S+)?\s*(active|inactive|permit-all)?/i);
+      if(m && /^(Gi|Fa|Te)/i.test(m[1])){ s.ipsg.interfaces.push({iface:m[1], mode:m[2]||null, status:m[3]||null}); s.ipsg.enabled=true; }
+    }
+    s.ipsg.evidence=[ev(block.device,block.command,block.startLine,block.rawCommand,"IP verify source")];
+    return true;
+  },
+  portSecurity(block, ds){
+    const s=ds.security; s.portSecurity.detected=true;
+    for(const L of block.lines){
+      const t=L.text;
+      // summary table: Port MaxSecureAddr CurrentAddr SecurityViolation SecurityAction
+      const m=t.match(/^(Gi\S+|Fa\S+|Te\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(Shutdown|Restrict|Protect)/i);
+      if(m){ const rec={iface:m[1], max:+m[2], current:+m[3], violations:+m[4], action:m[5], device:block.device,
+        evidence:[ev(block.device,"show port-security",L.n,t,"Port-security row")]};
+        s.portSecurity.interfaces.push(rec); s.portSecurity.enabled=true;
+        if(+m[4]>0) rec.hasViolation=true;
+      }
+      // detail form
+      const im=t.match(/Port Security\s*:\s*(Enabled|Disabled)/i); if(im){ s.portSecurity.enabled=/enabled/i.test(im[1]); }
+    }
+    s.portSecurity.evidence=s.portSecurity.evidence||[ev(block.device,block.command,block.startLine,block.rawCommand,"Port-security")];
+    return true;
+  },
+  portSecurityAddress(block, ds){
+    const s=ds.security;
+    for(const L of block.lines){
+      const mm=L.text.match(MAC_RE); const vm=L.text.match(/^\s*(\d{1,4})\s/);
+      const ty=L.text.match(/\b(SecureConfigured|SecureDynamic|SecureSticky)\b/i);
+      const pm=L.text.match(/(Gi\S+|Fa\S+|Te\S+)/i);
+      if(mm){ s.portSecurity.secureMacs.push({mac:MacUtils.normalizeMac(mm[1]), vlan:vm?+vm[1]:null,
+        type:ty?ty[1]:null, iface:pm?pm[1]:null, device:block.device,
+        evidence:[ev(block.device,"show port-security address",L.n,L.text,"Secure MAC")]}); }
+    }
+    return true;
+  },
+  errDisabled(block, ds){
+    for(const L of block.lines){
+      const m=L.text.match(/^(Gi\S+|Fa\S+|Te\S+|Eth\S+)\s+.*?err-?disabled\s+(\S+)?/i);
+      if(m){ ds.errDisabled.push({port:m[1], reason:m[2]||(L.text.match(/err-?disabled\s+(\S+)/i)||[])[1]||null,
+        device:block.device, evidence:[ev(block.device,"show interfaces status err-disabled",L.n,L.text,"Err-disabled")]}); }
+    }
+    return true;
+  },
+  authSessions(block, ds){
+    const s=ds.security; s.dot1x.detected=true;
+    for(const L of block.lines){
+      const t=L.text; const mm=t.match(MAC_RE);
+      const stM=t.match(/\b(Authz Success|Authc Success|Success|Unauthorized|Running|Auth Fail|Authc Failed)\b/i);
+      const meM=t.match(/\b(dot1x|mab)\b/i); const im=t.match(IP_RE); const pm=t.match(/(Gi\S+|Fa\S+|Te\S+)/i);
+      if(mm && stM){ ds.authSessions.push({mac:MacUtils.normalizeMac(mm[1]), ip:im?im[1]:null,
+        method:meM?meM[1].toLowerCase():null, status:stM[1], iface:pm?pm[1]:null, device:block.device,
+        evidence:[ev(block.device,"show authentication sessions",L.n,t,"Auth session")]});
+        if(meM&&/dot1x/i.test(meM[1])) s.dot1x.enabled=true;
+        if(meM&&/mab/i.test(meM[1])){ s.mab.detected=true; s.mab.enabled=true; }
+      }
+    }
+    return true;
+  },
+  accessLists(block, ds){
+    const s=ds.security; s.acl.detected=true; let cur=null;
+    for(const L of block.lines){
+      const t=L.text; let m;
+      if((m=t.match(/^(?:Standard|Extended)?\s*IP access list\s+(\S+)/i))){ cur={name:m[1], permit:0, deny:0, device:block.device,
+        evidence:[ev(block.device,"show access-lists",L.n,t,"ACL")]}; s.acl.lists.push(cur); continue; }
+      if(cur){ if(/\bpermit\b/i.test(t)) cur.permit++; if(/\bdeny\b/i.test(t)) cur.deny++;
+        const hit=t.match(/\((\d+)\s+match/i); }
+    }
+    return true;
+  },
+  neighbors(block, ds){
+    let cur=null;
+    for(const L of block.lines){
+      const t=L.text; let m;
+      if((m=t.match(/Device ID:\s*(\S+)/i))){ cur={neighbor:m[1], device:block.device,
+        evidence:[ev(block.device,block.command,L.n,t,"Neighbor")]}; ds.neighbors.push(cur); }
+      else if(cur && (m=t.match(/(?:Port ID|Local Intf|Interface):\s*(\S+)/i))){ if(!cur.localPort)cur.localPort=m[1]; }
+    }
+    return true;
+  },
+  // logs — %SW_MATM MACFLAP, %SW_DAI, %PORT_SECURITY, %AUTHMGR, etc.
+  logging(block, ds){
+    for(const L of block.lines){
+      const t=L.text;
+      if(!/%[A-Z0-9_]+-\d?-?[A-Z0-9_]+/.test(t) && !/%[A-Z_]+/.test(t)) continue;
+      const facM=t.match(/%([A-Z0-9_]+)-\d-([A-Z0-9_]+)/)||t.match(/%([A-Z0-9_]+)/);
+      const rec={facility:facM?facM[1]:null, mnem:facM&&facM[2]?facM[2]:null, text:t.trim(),
+        device:block.device, evidence:[ev(block.device,"show logging",L.n,t,"Log")]};
+      // MAC flap
+      let m;
+      if(/MACFLAP/i.test(t) && (m=t.match(/Host\s+([0-9a-fA-F.:-]+)\s+in\s+vlan\s+(\d+)\s+is flapping between port\s+(\S+)\s+and\s+port\s+(\S+)/i))){
+        rec.type="MACFLAP"; rec.mac=MacUtils.normalizeMac(m[1]); rec.vlan=+m[2]; rec.portA=m[3]; rec.portB=m[4];
+      } else if(/DAI|DHCP_SNOOPING_DENY|SW_DAI/i.test(t)){
+        rec.type="DAI_DENY"; const im=t.match(IP_RE); const pm=t.match(/(Gi\S+|Fa\S+|Te\S+)/i); const vm=t.match(/vlan\s+(\d+)/i);
+        if(im)rec.ip=im[1]; if(pm)rec.port=pm[1]; if(vm)rec.vlan=+vm[1]; const mm=t.match(MAC_RE); if(mm)rec.mac=MacUtils.normalizeMac(mm[1]);
+      } else if(/PSECURE_VIOLATION|PORT_SECURITY/i.test(t)){
+        rec.type="PSEC_VIOLATION"; const mm=t.match(MAC_RE); const pm=t.match(/(Gi\S+|Fa\S+|Te\S+)/i);
+        if(mm)rec.mac=MacUtils.normalizeMac(mm[1]); if(pm)rec.port=pm[1];
+      } else if(/AUTHMGR|DOT1X.*FAIL|MAB.*FAIL|AUTH.*FAIL/i.test(t)){ rec.type="AUTH_FAIL"; const mm=t.match(MAC_RE); if(mm)rec.mac=MacUtils.normalizeMac(mm[1]); }
+      else if(/LINK-3-UPDOWN|LINEPROTO/i.test(t)){ rec.type="LINK"; const pm=t.match(/(Gi\S+|Fa\S+|Te\S+)/i); if(pm)rec.port=pm[1]; }
+      else if(/SPANTREE/i.test(t)){ rec.type="STP"; }
+      ds.logs.push(rec);
+    }
+    return true;
+  }
+};
+
+/* =====================================================================
+   ANALYSIS ENGINE — builds the dataset from blocks, then classifies IPs.
+   ===================================================================== */
+function newSecurity(){
+  return {
+    dhcpSnooping:{detected:false,enabled:false,vlans:null,trusted:[],untrusted:[]},
+    dai:{detected:false,enabled:false,vlans:[],dropped:null},
+    ipsg:{detected:false,enabled:false,interfaces:[]},
+    portSecurity:{detected:false,enabled:false,interfaces:[],secureMacs:[]},
+    dot1x:{detected:false,enabled:false},
+    mab:{detected:false,enabled:false},
+    acl:{detected:false,lists:[]}
+  };
+}
+function newDataset(){
+  return {
+    devices:new Set(), blocks:[], commands:{}, warnings:[],
+    arp:[], dhcpBindings:[], snoopBindings:[], dhcpConflicts:[], macTable:[],
+    interfaces:[], intStatus:[], dhcpPools:[], dhcpPoolOps:[], excluded:[],
+    staticArp:[], sourceBinding:[], virtualIps:[], errDisabled:[], authSessions:[],
+    neighbors:[], logs:[], security:newSecurity(),
+    networks:[], analysis:null, timestamp:new Date().toISOString()
+  };
+}
+
+// dispatch table: canonical command -> parser method
+const DISPATCH={
+  "show ip arp":"arp", "show arp":"arp",
+  "show ip dhcp binding":"dhcpBinding",
+  "show ip dhcp snooping binding":"snoopBinding",
+  "show ip dhcp conflict":"dhcpConflict",
+  "show mac address-table":"macTable",
+  "show ip interface brief":"ipIntBrief",
+  "show interfaces status":"intStatus",
+  "show interfaces status err-disabled":"errDisabled",
+  "show running-config":"runningConfig",
+  "show ip dhcp pool":"dhcpPoolOp",
+  "show ip dhcp snooping":"dhcpSnooping",
+  "show ip dhcp snooping statistics":"dhcpSnooping",
+  "show ip arp inspection":"arpInspection",
+  "show ip arp inspection statistics":"arpInspection",
+  "show ip verify source":"verifySource",
+  "show port-security":"portSecurity",
+  "show port-security interface":"portSecurity",
+  "show port-security address":"portSecurityAddress",
+  "show authentication sessions":"authSessions",
+  "show access-session":"authSessions",
+  "show dot1x all":"authSessions",
+  "show mab all":"authSessions",
+  "show access-lists":"accessLists",
+  "show ip access-lists":"accessLists",
+  "show cdp neighbors detail":"neighbors",
+  "show lldp neighbors detail":"neighbors",
+  "show logging":"logging"
+};
+
+function analyzeText(text){
+  const ds=newDataset();
+  let blocks=detectCommandBlocks(text);
+  // Fallback: output pasted WITHOUT any "HOST#show ..." command header.
+  // Sniff the content line-by-line and build synthetic blocks so ARP / DHCP
+  // binding / MAC table / interface / config pasted on their own still parse.
+  const parsedRows=blocks.reduce((n,b)=>n+(b.command?1:0),0);
+  if(parsedRows===0){
+    const dev=(text.match(/^hostname\s+(\S+)/im)||[])[1]
+      || (text.match(/(?:^|\n)\s*([A-Za-z0-9][A-Za-z0-9._\-]{2,62})[#>]\s*$/)||[])[1]
+      || "DEVICE";
+    const sniffed=sniffBlocks(text, dev);
+    const hasConfig=/^\s*(interface\s+\S|ip\s+dhcp\s+pool|ip\s+access-list\s|hostname\s|ip\s+dhcp\s+snooping)/im.test(text);
+    // config is context-sensitive across lines → parse the whole text as one block;
+    // keep sniffed table blocks (arp/binding/mac/etc.) alongside it.
+    blocks = sniffed.filter(b=>b.command!=="show running-config");
+    if(hasConfig){
+      blocks.unshift({device:dev, command:"show running-config", rawCommand:"show running-config",
+        startLine:1, detected:true, lines:text.replace(/\r/g,"").split("\n").map((t,i)=>({n:i+1,text:t}))});
+    }
+  }
+  ds.blocks=blocks;
+  blocks.forEach(b=>{
+    ds.devices.add(b.device);
+    const cmd=b.command;
+    if(!cmd){ if(b.rawCommand) ds.commands[b.rawCommand]="Unsupported Format"; return; }
+    const fn=DISPATCH[cmd];
+    // running-config catch-all: excluded include etc.
+    let status="Detected";
+    if(fn && Parsers[fn]){
+      try{
+        const ok=Parsers[fn](b, ds);
+        // also run runningConfig for include-style excluded lines
+        if(cmd==="show running-config" && /excluded-address/.test(b.rawCommand)) Parsers.excludedInclude(b,ds);
+        status=ok?"Parsed Successfully":"Parsed with Warning";
+      }catch(e){ status="Parsed with Warning"; ds.warnings.push({msg:"Parser error: "+cmd+" ("+e.message+")"}); }
+    } else if(/logging/i.test(cmd)||/%/.test(b.lines.map(l=>l.text).join(""))){
+      Parsers.logging(b,ds); status="Parsed Successfully";
+    } else { status="Detected"; }
+    // keep best status per command
+    const prev=ds.commands[cmd];
+    const rank={"Parsed Successfully":3,"Parsed with Warning":2,"Detected":1,"Unsupported Format":0};
+    if(!prev||(rank[status]||0)>(rank[prev]||0)) ds.commands[cmd]=status;
+  });
+  // also scan raw text for stray syslog lines outside blocks
+  if(ds.logs.length===0 && /%[A-Z]/.test(text)){
+    Parsers.logging({device:"UNKNOWN",command:"show logging",startLine:0,
+      lines:text.split("\n").map((t,i)=>({n:i+1,text:t}))}, ds);
+  }
+  postProcessReservations(ds);
+  buildNetworks(ds);
+  classify(ds);
+  return ds;
+}
+
+/* Convert DHCP `host`/`client-identifier` reservation pools into binding
+   records (so they surface as Used IPs) and flag reservation-specific issues. */
+function postProcessReservations(ds){
+  const cidSeen=new Map();   // client-id -> first pool (duplicate detection)
+  ds.reservationIssues=[];
+  ds.dhcpPools.forEach(p=>{
+    if(!p.isReservation) return;
+    // emit a binding so the reserved IP appears as Used
+    if(p.host){
+      ds.dhcpBindings.push({ip:p.host, mac:p.mac||null, clientId:p.clientId||null,
+        type:"Reservation", lease:"Manual (reservation)", device:p.device, poolName:p.name,
+        evidence:p.evidence});
+    }
+    // reservation health checks
+    if(!p.host && p.clientId){
+      ds.reservationIssues.push({severity:"Warning", type:"DHCP Reservation ไม่มี host", ip:null,
+        desc:"Pool "+p.name+" มี client-identifier แต่ไม่มี host (ไม่ผูก IP)", cause:"Config ไม่สมบูรณ์", device:p.device, evidence:p.evidence});
+    }
+    if(p.host && !p.clientId && !p.mac){
+      ds.reservationIssues.push({severity:"Info", type:"DHCP Reservation ไม่มี client-identifier", ip:p.host,
+        desc:"Pool "+p.name+" มี host "+p.host+" แต่ไม่มี client-identifier/hardware-address", cause:"Config ไม่สมบูรณ์", device:p.device, evidence:p.evidence});
+    }
+    // default-router not inside the reservation's own subnet
+    if(p.host && p.prefix!=null && p.defaultRouter){
+      p.defaultRouter.forEach(gw=>{ if(IPv4Utils.isValidIPv4(gw) && !IPv4Utils.isIpInSubnet(gw,p.network,p.prefix))
+        ds.reservationIssues.push({severity:"Warning", type:"Default-router นอก Subnet ของ Reservation", ip:p.host, mac:p.mac,
+          desc:"Pool "+p.name+": host "+p.host+" แต่ default-router "+gw+" ไม่อยู่ใน "+p.network+"/"+p.prefix, cause:"Gateway ผิด subnet", device:p.device, evidence:p.evidence}); });
+    }
+    // pool name looks like an IP but differs from host IP
+    const nmeIp=(p.name.match(/^(\d+\.\d+\.\d+\.\d+)/)||[])[1];
+    if(nmeIp && p.host && nmeIp!==p.host){
+      ds.reservationIssues.push({severity:"Info", type:"ชื่อ Pool ไม่ตรงกับ host IP", ip:p.host,
+        desc:"Pool ชื่อ "+p.name+" แต่ host คือ "+p.host, cause:"อาจตั้งชื่อผิด", device:p.device, evidence:p.evidence});
+    }
+    // duplicate client-identifier across pools
+    if(p.clientId){ const key=p.clientId.toLowerCase();
+      if(cidSeen.has(key)){ const first=cidSeen.get(key);
+        ds.reservationIssues.push({severity:"Warning", type:"client-identifier ซ้ำหลาย Pool", mac:p.mac, ip:p.host,
+          desc:"client-identifier "+p.clientId+" ใช้ทั้ง pool "+first.name+" และ "+p.name, cause:"Reservation ซ้ำ / อุปกรณ์เดียวหลาย IP", device:p.device, evidence:[...(first.evidence||[]),...(p.evidence||[])]});
+      } else cidSeen.set(key,p); }
+  });
+}
+
+/* Derive candidate networks from interface IPs and DHCP pools */
+function buildNetworks(ds){
+  const map=new Map();
+  const add=(ip,prefix,vlan,gw,src,evidence)=>{
+    if(!IPv4Utils.isValidIPv4(ip)||prefix==null||prefix<0||prefix>32) return;
+    const sub=IPv4Utils.calculateSubnet(ip,prefix); if(!sub) return;
+    const key=sub.cidr;
+    if(!map.has(key)) map.set(key,{...sub, vlan:vlan??null, gateway:gw??null, sources:new Set(), evidence:[]});
+    const n=map.get(key); n.sources.add(src);
+    if(vlan!=null&&n.vlan==null) n.vlan=vlan;
+    if(gw&&!n.gateway) n.gateway=gw;
+    if(evidence) n.evidence.push(...evidence);
+  };
+  ds.interfaces.forEach(i=>{ if(i.ip&&i.prefix!=null && !i.secondary) add(i.ip,i.prefix,i.vlan,i.ip,"Interface",i.evidence);
+    else if(i.ip&&i.prefix!=null) add(i.ip,i.prefix,i.vlan,null,"Secondary IP",i.evidence); });
+  ds.dhcpPools.forEach(p=>{ if(p.network&&p.prefix!=null) add(p.network,p.prefix,p.vlan||null,
+    (p.defaultRouter&&p.defaultRouter[0])||null,"DHCP Pool",p.evidence); });
+  ds.dhcpPoolOps.forEach(p=>{ if(p.subnet&&p.prefix!=null) add(p.subnet,p.prefix,null,null,"DHCP Pool",p.evidence); });
+  ds.networks=[...map.values()].map(n=>({...n,sources:[...n.sources]}))
+    .sort((a,b)=>a.networkNum-b.networkNum);
+}
+
+/* ------------- classification helpers ------------- */
+function ipInAnyNetwork(ip,networks){ return networks.find(n=>IPv4Utils.isIpInSubnet(ip,n.network,n.prefix)); }
+function inExcluded(ip,ds){
+  const u=IPv4Utils.ipToUint32(ip); if(u===null) return null;
+  for(const e of ds.excluded){ const s=IPv4Utils.ipToUint32(e.start),en=IPv4Utils.ipToUint32(e.end);
+    if(s!==null&&en!==null&&u>=s&&u<=en) return e; }
+  return null;
+}
+
+/* Core classification: build used / reserved maps, then free candidates */
+function classify(ds){
+  const A={ used:new Map(), reserved:new Map(), unknown:[], evidenceByIp:new Map() };
+  const addEv=(ip,list)=>{ if(!A.evidenceByIp.has(ip))A.evidenceByIp.set(ip,[]); A.evidenceByIp.get(ip).push(...list); };
+
+  // USED sources
+  ds.arp.forEach(r=>{ if(!r.ip)return; addEv(r.ip,r.evidence);
+    const stale=r.age && !isNaN(+r.age) && +r.age>240;
+    upsertUsed(A.used,r.ip,{mac:r.mac,vlan:r.vlan,iface:r.iface,device:r.device,
+      status:r.incomplete?"Incomplete ARP":(stale?"Stale ARP":"Active"),source:"ARP",age:r.age},r.evidence); });
+  ds.dhcpBindings.forEach(r=>{ addEv(r.ip,r.evidence);
+    // Manual + Selecting = reservation configured but client not currently bound;
+    // Manual/Automatic + Active = actively leased. Reflect that in the status.
+    const isReserv=r.type==="Reservation"||(/manual/i.test(r.type||"")&&/select|request/i.test(r.state||""));
+    const status = isReserv?"DHCP Reservation":(/manual/i.test(r.type||"")?"Static (DHCP Manual)":"DHCP Lease");
+    upsertUsed(A.used,r.ip,{mac:r.mac,vlan:r.vlan,iface:r.iface,device:r.device,
+      status, source:r.type==="Reservation"?"Reservation":"DHCP",lease:r.lease,clientId:r.clientId},r.evidence); });
+  ds.snoopBindings.forEach(r=>{ addEv(r.ip,r.evidence);
+    upsertUsed(A.used,r.ip,{mac:r.mac,vlan:r.vlan,iface:r.iface,device:r.device,status:"DHCP Lease",source:"Snooping"},r.evidence); });
+  ds.staticArp.forEach(r=>{ addEv(r.ip,r.evidence);
+    upsertUsed(A.used,r.ip,{mac:r.mac,device:r.device,status:"Static",source:"Static ARP"},r.evidence); });
+  ds.sourceBinding.forEach(r=>{ addEv(r.ip,r.evidence);
+    upsertUsed(A.used,r.ip,{mac:r.mac,vlan:r.vlan,iface:r.iface,device:r.device,status:"Static",source:"Source Binding"},r.evidence); });
+
+  // RESERVED / infrastructure
+  ds.interfaces.forEach(i=>{ if(!i.ip)return; addEv(i.ip,i.evidence);
+    const net=ipInAnyNetwork(i.ip,ds.networks);
+    const isGw=net&&net.gateway===i.ip;
+    A.reserved.set(i.ip,mergeReserved(A.reserved.get(i.ip),{ip:i.ip,type:i.iface&&/Vlan/i.test(i.iface)?"Gateway":"Interface",
+      vlan:i.vlan,iface:i.iface,network:net?net.cidr:null,source:i.fromConfig?"Interface (config)":"Interface",evidence:i.evidence}));
+    // interface IP is also "used" as SVI/Gateway
+    upsertUsed(A.used,i.ip,{vlan:i.vlan,iface:i.iface,device:i.device,status:/Vlan/i.test(i.iface||"")?"SVI":"Gateway",source:"Interface"},i.evidence);
+  });
+  ds.virtualIps.forEach(v=>{ addEv(v.ip,v.evidence);
+    A.reserved.set(v.ip,mergeReserved(A.reserved.get(v.ip),{ip:v.ip,type:"Virtual IP",vlan:v.vlan,iface:v.iface,
+      source:v.proto,evidence:v.evidence}));
+    upsertUsed(A.used,v.ip,{vlan:v.vlan,iface:v.iface,device:v.device,status:"Virtual IP",source:v.proto},v.evidence); });
+  ds.excluded.forEach(e=>{ addEv(e.start,e.evidence);
+    const label=e.start===e.end?e.start:e.start+" – "+e.end;
+    A.reserved.set("excl:"+label,mergeReserved(A.reserved.get("excl:"+label),{ip:label,type:"Excluded",
+      source:"DHCP Excluded",evidence:e.evidence,range:[e.start,e.end]})); });
+  // network + broadcast reserved for each network
+  ds.networks.forEach(n=>{ if(n.prefix<31){
+    A.reserved.set(n.network,mergeReserved(A.reserved.get(n.network),{ip:n.network,type:"Network",network:n.cidr,vlan:n.vlan,source:"Subnet",evidence:n.evidence}));
+    A.reserved.set(n.broadcast,mergeReserved(A.reserved.get(n.broadcast),{ip:n.broadcast,type:"Broadcast",network:n.cidr,vlan:n.vlan,source:"Subnet",evidence:n.evidence}));
+  }});
+
+  // UNKNOWN: MAC in table with no IP resolution, or DHCP conflict IP unresolved
+  const arpIps=new Set(ds.arp.map(r=>r.ip));
+  ds.dhcpConflicts.forEach(c=>{ if(!A.used.has(c.ip)) A.unknown.push({ip:c.ip,reason:"DHCP Conflict — ต้องตรวจสอบว่าใครถือ IP นี้",
+    missing:"ARP / MAC binding", suggested:"show ip arp | include "+c.ip, risk:"High", evidence:c.evidence}); });
+
+  ds.analysis=A;
+  computeFreeAndSummary(ds);
+  ConflictDetector.run(ds);
+  SecurityScore.compute(ds);
+}
+function upsertUsed(map,ip,fields,evidence){
+  if(!IPv4Utils.isValidIPv4(ip)) return;
+  if(!map.has(ip)) map.set(ip,{ip,macs:new Set(),vlans:new Set(),ifaces:new Set(),devices:new Set(),
+    sources:new Set(),statuses:new Set(),evidence:[],detail:{}});
+  const u=map.get(ip);
+  if(fields.mac) u.macs.add(fields.mac);
+  if(fields.vlan!=null) u.vlans.add(fields.vlan);
+  if(fields.iface) u.ifaces.add(fields.iface);
+  if(fields.device) u.devices.add(fields.device);
+  if(fields.source) u.sources.add(fields.source);
+  if(fields.status) u.statuses.add(fields.status);
+  Object.assign(u.detail,{lease:fields.lease||u.detail.lease,age:fields.age||u.detail.age,clientId:fields.clientId||u.detail.clientId});
+  if(evidence) u.evidence.push(...evidence);
+}
+function mergeReserved(existing,rec){
+  if(!existing) return {...rec,types:new Set([rec.type]),evidence:rec.evidence?[...rec.evidence]:[]};
+  existing.types.add(rec.type);
+  if(rec.evidence) existing.evidence.push(...rec.evidence);
+  if(rec.vlan!=null&&existing.vlan==null) existing.vlan=rec.vlan;
+  if(rec.network&&!existing.network) existing.network=rec.network;
+  return existing;
+}
+
+/* =====================================================================
+   FreeIpAnalyzer — transparent confidence scoring for likely-free IPs.
+   Never claims "100% free"; caps score when ARP/DHCP evidence is missing.
+   ===================================================================== */
+const FreeIpAnalyzer = {
+  MAX_ENUM:8192,
+  score(ip, ds, sets){
+    // returns {score, checks:[{label,pts,ok}], missing:[]}
+    const checks=[]; let score=0; const missing=[];
+    const has=(set,label,pts)=>{ const present=set.has(ip); if(!present){score+=pts; checks.push({label:"ไม่พบใน "+label,pts,ok:true}); }
+      else checks.push({label:"พบใน "+label,pts:0,ok:false}); return present; };
+    has(sets.arp,"ARP",15);
+    has(sets.dhcp,"DHCP Binding",15);
+    has(sets.snoop,"DHCP Snooping Binding",15);
+    has(sets.staticArp,"Static ARP",10);
+    has(sets.source,"IP Source Binding",10);
+    if(!inExcluded(ip,ds)){ score+=10; checks.push({label:"ไม่อยู่ใน Excluded Range",pts:10,ok:true}); }
+    else checks.push({label:"อยู่ใน Excluded Range",pts:0,ok:false});
+    if(!sets.infra.has(ip)){ score+=10; checks.push({label:"ไม่ใช่ Interface IP / Gateway",pts:10,ok:true}); }
+    else checks.push({label:"เป็น Interface IP / Gateway",pts:0,ok:false});
+    if(!sets.netbcast.has(ip)){ score+=10; checks.push({label:"ไม่ใช่ Network / Broadcast",pts:10,ok:true}); }
+    else checks.push({label:"เป็น Network / Broadcast",pts:0,ok:false});
+    // snapshot bonus
+    if(sets.prevActive){ if(!sets.prevActive.has(ip)){ score+=5; checks.push({label:"ไม่พบใน Snapshot ก่อนหน้า",pts:5,ok:true}); }
+      else checks.push({label:"เคยพบใน Snapshot ก่อนหน้า",pts:0,ok:false}); }
+    // evidence sufficiency: if neither ARP nor DHCP data exists at all, cap the score
+    const haveArp=ds.arp.length>0, haveDhcp=ds.dhcpBindings.length>0||ds.snoopBindings.length>0;
+    if(!haveArp&&!haveDhcp){ missing.push("ARP Table","DHCP Binding"); score=Math.min(score,45); }
+    else if(!haveArp){ missing.push("ARP Table"); score=Math.min(score,72); }
+    else if(!haveDhcp){ missing.push("DHCP Binding"); }
+    return {score:Math.max(0,Math.min(100,score)), checks, missing};
+  },
+  level(s,insufficient){
+    if(insufficient) return {t:"Insufficient Data",cls:"p-gray"};
+    if(s>=85) return {t:"High Confidence",cls:"p-green"};
+    if(s>=70) return {t:"Medium Confidence",cls:"p-cyan"};
+    if(s>=50) return {t:"Verify First",cls:"p-yellow"};
+    return {t:"Insufficient Data",cls:"p-gray"};
+  }
+};
+
+function computeFreeAndSummary(ds){
+  const A=ds.analysis;
+  // build lookup sets
+  const sets={
+    arp:new Set(ds.arp.map(r=>r.ip)),
+    dhcp:new Set(ds.dhcpBindings.map(r=>r.ip)),
+    snoop:new Set(ds.snoopBindings.map(r=>r.ip)),
+    staticArp:new Set(ds.staticArp.map(r=>r.ip)),
+    source:new Set(ds.sourceBinding.map(r=>r.ip)),
+    infra:new Set([...ds.interfaces.filter(i=>i.ip).map(i=>i.ip),...ds.virtualIps.map(v=>v.ip)]),
+    netbcast:new Set(),
+    prevActive:SnapshotManager.prevActiveSet()
+  };
+  ds.networks.forEach(n=>{ if(n.prefix<31){ sets.netbcast.add(n.network); sets.netbcast.add(n.broadcast); } });
+  ds.freeSets=sets;
+
+  const usedSet=new Set([...A.used.keys()]);
+  const reservedSingles=new Set([...A.reserved.keys()].filter(k=>IPv4Utils.isValidIPv4(k)));
+
+  const free=[];
+  let enumWarn=false, totalUsable=0;
+  ds.networks.forEach(n=>{
+    totalUsable+=n.usable;
+    if(n.total>this_MAX()){ enumWarn=true; return; }
+    for(let u=n.firstNum;u<=n.lastNum;u++){
+      const ip=IPv4Utils.uint32ToIp(u>>>0);
+      if(usedSet.has(ip)||reservedSingles.has(ip)) continue;
+      if(inExcluded(ip,ds)) continue;
+      const r=FreeIpAnalyzer.score(ip,ds,sets);
+      const insufficient=r.missing.length>0 && r.score<70;
+      const lv=FreeIpAnalyzer.level(r.score,insufficient && r.score<50);
+      free.push({ip,network:n.cidr,score:r.score,level:lv.t,cls:lv.cls,checks:r.checks,missing:r.missing});
+    }
+  });
+  A.free=free;
+  A.enumWarn=enumWarn;
+  A.totalUsable=totalUsable;
+
+  // DHCP pool status analysis
+  DhcpPoolAnalyzer.run(ds);
+  BlockedAnalyzer.run(ds);
+}
+function this_MAX(){ return FreeIpAnalyzer.MAX_ENUM; }
+
+/* =====================================================================
+   DhcpPoolAnalyzer — usage %, thresholds, health checks
+   ===================================================================== */
+const DhcpPoolAnalyzer = {
+  run(ds){
+    const pools=[];
+    const bindingsByNet=(net,pfx)=>ds.dhcpBindings.filter(b=>net&&pfx!=null&&IPv4Utils.isIpInSubnet(b.ip,net,pfx)).length;
+    // reservation (host/client-identifier) pools are shown as Used IPs, not as
+    // utilization rows — count them per subnet for a summary instead.
+    const reservations=ds.dhcpPools.filter(p=>p.isReservation);
+    ds.analysis.reservationCount=reservations.length;
+    ds.dhcpPools.filter(p=>!p.isReservation).forEach(p=>{
+      const op=ds.dhcpPoolOps.find(o=>o.name===p.name);
+      const sub=(p.network&&p.prefix!=null)?IPv4Utils.calculateSubnet(p.network,p.prefix):null;
+      const total=op&&op.total!=null?op.total:(sub?sub.usable:null);
+      const leased=op&&op.leased!=null?op.leased:bindingsByNet(p.network,p.prefix);
+      const excludedCount=op&&op.excludedCount!=null?op.excludedCount:null;
+      const usage=(total&&total>0&&leased!=null)?Math.round(leased/total*1000)/10:null;
+      let status,cls;
+      if(usage==null){ status="Parsing Incomplete"; cls="p-gray"; }
+      else if(usage>=100){ status="Exhausted"; cls="p-red"; }
+      else if(usage>=95){ status="Critical"; cls="p-red"; }
+      else if(usage>=85){ status="Warning"; cls="p-yellow"; }
+      else if(usage>=70){ status="Watch"; cls="p-cyan"; }
+      else { status="Normal"; cls="p-green"; }
+      pools.push({name:p.name, network:sub?sub.cidr:(p.network||null), mask:p.mask||(sub?sub.maskStr:null),
+        vlan:p.vlan||null, gateway:(p.defaultRouter&&p.defaultRouter[0])||null, dns:p.dns||null, lease:p.lease||null,
+        total, leased, excludedCount, available:(total!=null&&leased!=null)?Math.max(0,total-leased):null,
+        usage, status, cls, evidence:p.evidence, prefix:p.prefix, netAddr:p.network,
+        noGateway:!p.defaultRouter, noDns:!p.dns});
+    });
+    // operational-only pools with no config
+    ds.dhcpPoolOps.forEach(o=>{ if(!pools.find(p=>p.name===o.name)){
+      const usage=(o.total>0)?Math.round(o.leased/o.total*1000)/10:null;
+      pools.push({name:o.name, network:o.subnet?o.subnet+"/"+o.prefix:null, total:o.total, leased:o.leased,
+        available:(o.total!=null&&o.leased!=null)?o.total-o.leased:null, usage,
+        status:usage==null?"Parsing Incomplete":(usage>=100?"Exhausted":usage>=95?"Critical":usage>=85?"Warning":usage>=70?"Watch":"Normal"),
+        cls:usage==null?"p-gray":(usage>=95?"p-red":usage>=85?"p-yellow":usage>=70?"p-cyan":"p-green"),
+        evidence:o.evidence, prefix:o.prefix, netAddr:o.subnet}); } });
+    ds.analysis.pools=pools;
+  }
+};
+
+/* =====================================================================
+   BlockedAnalyzer — collect blocked / denied / quarantined entities
+   ===================================================================== */
+const BlockedAnalyzer = {
+  run(ds){
+    const out=[];
+    ds.errDisabled.forEach(e=>out.push({port:e.port, status:"Err-disabled", reason:e.reason||"err-disabled",
+      feature:"Err-disable", device:e.device, evidence:e.evidence}));
+    (ds.security.portSecurity.interfaces||[]).forEach(p=>{ if(p.violations>0)
+      out.push({port:p.iface, status:p.action==="Shutdown"?"Err-disabled":(p.action==="Protect"?"Protected":"Restricted"),
+        reason:"Port-security violation ×"+p.violations, feature:"Port Security", device:p.device, evidence:p.evidence}); });
+    ds.dhcpConflicts.forEach(c=>out.push({ip:c.ip, status:"Conflict", reason:"DHCP conflict ("+(c.method||"?")+")",
+      feature:"DHCP", device:c.device, evidence:c.evidence}));
+    ds.authSessions.forEach(a=>{ if(/Unauthorized|Fail/i.test(a.status||""))
+      out.push({ip:a.ip, mac:a.mac, port:a.iface, status:"Unauthorized", reason:(a.method||"auth")+" "+a.status,
+        feature:a.method==="mab"?"MAB":"802.1X", device:a.device, evidence:a.evidence}); });
+    ds.logs.forEach(l=>{
+      if(l.type==="DAI_DENY") out.push({ip:l.ip, mac:l.mac, port:l.port, vlan:l.vlan, status:"Denied",
+        reason:"Dynamic ARP Inspection deny", feature:"DAI", device:l.device, evidence:l.evidence});
+      if(l.type==="PSEC_VIOLATION") out.push({mac:l.mac, port:l.port, status:"Blocked",
+        reason:"Port-security violation", feature:"Port Security", device:l.device, evidence:l.evidence});
+      if(l.type==="AUTH_FAIL") out.push({mac:l.mac, status:"Unauthorized", reason:"Authentication failure",
+        feature:"802.1X/MAB", device:l.device, evidence:l.evidence});
+    });
+    ds.analysis.blocked=out;
+  }
+};
+
+/* =====================================================================
+   ConflictDetector — implements the anomaly checks (section 15).
+   Each conflict: {severity,type,ip,mac,vlan,iface,device,desc,cause,evidence}
+   ===================================================================== */
+const ConflictDetector = {
+  run(ds){
+    const C=[]; const push=o=>C.push(o);
+    const nets=ds.networks;
+
+    // 15.1 one IP -> many MACs (across arp/dhcp/snoop/static)
+    const ipMac=new Map();
+    const feed=(ip,mac,src,vlan,iface,dev,evi)=>{ if(!ip||!mac)return;
+      if(!ipMac.has(ip))ipMac.set(ip,[]); ipMac.get(ip).push({mac,src,vlan,iface,dev,evi}); };
+    ds.arp.forEach(r=>feed(r.ip,r.mac,"ARP",r.vlan,r.iface,r.device,r.evidence));
+    ds.dhcpBindings.forEach(r=>feed(r.ip,r.mac,"DHCP",null,null,r.device,r.evidence));
+    ds.snoopBindings.forEach(r=>feed(r.ip,r.mac,"Snooping",r.vlan,r.iface,r.device,r.evidence));
+    ds.staticArp.forEach(r=>feed(r.ip,r.mac,"Static",null,null,r.device,r.evidence));
+    ipMac.forEach((list,ip)=>{ const macs=[...new Set(list.map(x=>x.mac))];
+      if(macs.length>1){ const activeArp=list.filter(x=>x.src==="ARP").length;
+        push({severity:activeArp>1?"Critical":"Warning", type:"IP มีหลาย MAC", ip, mac:macs.join(", "),
+          vlan:list.map(x=>x.vlan).find(v=>v!=null)??null, iface:list.map(x=>x.iface).find(Boolean)||null,
+          device:[...new Set(list.map(x=>x.dev))].join(","),
+          desc:"IP "+ip+" ผูกกับ "+macs.length+" MAC", cause:"Duplicate IP / ARP Spoofing / NIC Replacement / DHCP Reassignment",
+          evidence:list.flatMap(x=>x.evi)}); } });
+
+    // 15.2 one MAC -> many IPs
+    // A switch/router shares one MAC across its own SVIs / secondary addresses;
+    // that is expected, so downgrade the finding when every IP is infrastructure.
+    const infraIps=new Set([...ds.interfaces.filter(i=>i.ip).map(i=>i.ip),...ds.virtualIps.map(v=>v.ip)]);
+    const macIp=new Map();
+    ipMac.forEach((list,ip)=>list.forEach(x=>{ if(!macIp.has(x.mac))macIp.set(x.mac,new Map()); macIp.get(x.mac).set(ip,x); }));
+    macIp.forEach((ipmap,mac)=>{ if(ipmap.size>1){ const ips=[...ipmap.keys()];
+      const vlans=new Set([...ipmap.values()].map(x=>x.vlan).filter(v=>v!=null));
+      const allInfra=ips.every(ip=>infraIps.has(ip));
+      push({severity:allInfra?"Info":"Warning", type:"MAC มีหลาย IP", mac, ip:ips.join(", "),
+        vlan:[...vlans].join(",")||null, device:[...new Set([...ipmap.values()].map(x=>x.dev))].join(","),
+        desc:"MAC "+mac+" ผูกกับ "+ips.length+" IP"+(vlans.size>1?" (คนละ VLAN)":" (VLAN เดียว)")+(allInfra?" — เป็น SVI/Secondary ของอุปกรณ์เอง (ปกติ)":""),
+        cause:allInfra?"อุปกรณ์ใช้ MAC เดียวกับหลาย SVI/Secondary (ปกติ)":"Multi-IP device / DHCP lease change / Static+DHCP / VM / Proxy ARP",
+        evidence:[...ipmap.values()].flatMap(x=>x.evi)}); } });
+
+    // 15.3 MAC moving across ports (mac table + MACFLAP logs)
+    const macPort=new Map();
+    ds.macTable.forEach(r=>{ if(!r.mac||!r.port)return; const key=r.mac; if(!macPort.has(key))macPort.set(key,new Set());
+      macPort.get(key).add(r.device+":"+r.port); });
+    macPort.forEach((ports,mac)=>{ if(ports.size>1){
+      push({severity:"Warning", type:"MAC ย้ายหลาย Port", mac, iface:[...ports].join(" ↔ "),
+        desc:"MAC "+mac+" ปรากฏบน "+ports.size+" port", cause:"Network Loop / Unmanaged Switch / EtherChannel / Wireless Roaming / VM",
+        evidence:ds.macTable.filter(r=>r.mac===mac).flatMap(r=>r.evidence)}); } });
+    ds.logs.filter(l=>l.type==="MACFLAP").forEach(l=>{
+      push({severity:"Critical", type:"MAC Flapping (Log)", mac:l.mac, vlan:l.vlan, iface:l.portA+" ↔ "+l.portB,
+        device:l.device, desc:"MACFLAP: "+l.mac+" flapping "+l.portA+"/"+l.portB,
+        cause:"Network Loop / Uplink Flap / Wireless Roaming", evidence:l.evidence}); });
+
+    // 15.4 DHCP lease but no ARP
+    const arpIps=new Set(ds.arp.map(r=>r.ip));
+    if(ds.arp.length>0) ds.dhcpBindings.forEach(b=>{ if(!arpIps.has(b.ip))
+      push({severity:"Info", type:"DHCP Lease แต่ไม่พบ ARP", ip:b.ip, mac:b.mac, device:b.device,
+        desc:b.ip+" มี DHCP binding แต่ไม่พบใน ARP — Needs Verification",
+        cause:"Client offline / ARP expired / lease ยังไม่หมด / อยู่หลัง router อื่น", evidence:b.evidence}); });
+
+    // 15.5 ARP present but no MAC table
+    const macTblSet=new Set(ds.macTable.map(r=>r.mac));
+    if(ds.macTable.length>0) ds.arp.forEach(r=>{ if(r.mac && !macTblSet.has(r.mac))
+      push({severity:"Info", type:"ARP มี แต่ไม่พบใน MAC Table", ip:r.ip, mac:r.mac, vlan:r.vlan, device:r.device,
+        desc:r.mac+" อยู่ใน ARP แต่ไม่พบใน MAC address-table",
+        cause:"อยู่หลัง Uplink / MAC aging / คนละ Switch / Missing output",
+        suggested:"show mac address-table address "+MacUtils.toCisco(r.mac), evidence:r.evidence}); });
+
+    // 15.6 gateway handed out by DHCP
+    const gwSet=new Set([...ds.interfaces.filter(i=>i.ip).map(i=>i.ip),...ds.virtualIps.map(v=>v.ip),
+      ...ds.dhcpPools.flatMap(p=>p.defaultRouter||[])]);
+    ds.dhcpBindings.forEach(b=>{ if(gwSet.has(b.ip))
+      push({severity:"Critical", type:"Gateway ถูกแจกโดย DHCP", ip:b.ip, mac:b.mac, device:b.device,
+        desc:"Gateway หรือ Virtual Gateway "+b.ip+" อยู่ในช่วงที่ DHCP สามารถแจกได้", cause:"DHCP range รวม gateway",
+        evidence:b.evidence}); });
+
+    // 15.7 IP out of subnet
+    if(nets.length>0){
+      const chkOut=(ip,label,evi,dev,sev)=>{ if(!IPv4Utils.isValidIPv4(ip))return; if(!ipInAnyNetwork(ip,nets))
+        push({severity:sev||"Warning", type:"IP อยู่นอก Subnet", ip, device:dev, desc:ip+" ("+label+") ไม่อยู่ในเครือข่ายที่ตรวจพบ",
+          cause:"Route / Secondary IP / คนละ VLAN / ข้อมูลไม่ครบ", evidence:evi}); };
+      ds.dhcpBindings.forEach(b=>chkOut(b.ip,"DHCP binding",b.evidence,b.device,"Critical"));
+      ds.arp.forEach(r=>chkOut(r.ip,"ARP",r.evidence,r.device,"Info"));
+    }
+
+    // 15.8 dynamic range overlaps excluded — flag exclusions outside network
+    ds.dhcpPools.forEach(p=>{ if(!p.network||p.prefix==null)return;
+      ds.excluded.forEach(e=>{ const s=IPv4Utils.ipToUint32(e.start),en=IPv4Utils.ipToUint32(e.end);
+        const inNet=IPv4Utils.isIpInSubnet(e.start,p.network,p.prefix);
+        if(!inNet && !ipInAnyNetwork(e.start,nets))
+          push({severity:"Warning", type:"Excluded Address นอก Network", ip:e.start+" – "+e.end, device:e.device,
+            desc:"Excluded range อยู่นอกทุก network ที่ตรวจพบ", cause:"Config ผิด หรือ network ไม่ถูก parse", evidence:e.evidence}); }); });
+
+    // 15.9 static IP inside dynamic range and not excluded
+    const staticIps=[...ds.staticArp.map(r=>({ip:r.ip,evi:r.evidence,dev:r.device,src:"Static ARP"})),
+      ...ds.sourceBinding.map(r=>({ip:r.ip,evi:r.evidence,dev:r.device,src:"Source Binding"}))];
+    ds.dhcpPools.forEach(p=>{ if(!p.network||p.prefix==null)return;
+      staticIps.forEach(s=>{ if(IPv4Utils.isIpInSubnet(s.ip,p.network,p.prefix) && !inExcluded(s.ip,ds))
+        push({severity:"Critical", type:"Static IP ใน Dynamic Range", ip:s.ip, device:s.dev,
+          desc:s.ip+" ("+s.src+") อยู่ใน DHCP pool "+p.name+" และไม่ได้ Exclude — เสี่ยง Duplicate IP",
+          cause:"Static ไม่ถูก exclude ออกจาก DHCP", evidence:s.evi}); }); });
+
+    // 15.10 network / broadcast used
+    nets.forEach(n=>{ if(n.prefix>=31)return;
+      [["Network",n.network],["Broadcast",n.broadcast]].forEach(([kind,addr])=>{
+        const hit=ds.arp.find(r=>r.ip===addr)||ds.dhcpBindings.find(b=>b.ip===addr);
+        if(hit) push({severity:"Critical", type:kind+" Address ถูกใช้", ip:addr, mac:hit.mac||null, device:hit.device,
+          desc:addr+" เป็น "+kind+" address ของ "+n.cidr+" แต่พบว่าถูกใช้งาน", cause:"Misconfiguration", evidence:hit.evidence}); }); });
+
+    // 15.11 VLAN mismatch between arp / snoop / mac table
+    const vlanByIp=new Map();
+    ds.arp.forEach(r=>{ if(r.ip&&r.vlan!=null){ if(!vlanByIp.has(r.ip))vlanByIp.set(r.ip,{}); vlanByIp.get(r.ip).arp=r.vlan; } });
+    ds.snoopBindings.forEach(r=>{ if(r.ip&&r.vlan!=null){ if(!vlanByIp.has(r.ip))vlanByIp.set(r.ip,{}); vlanByIp.get(r.ip).snoop=r.vlan; } });
+    ds.sourceBinding.forEach(r=>{ if(r.ip&&r.vlan!=null){ if(!vlanByIp.has(r.ip))vlanByIp.set(r.ip,{}); vlanByIp.get(r.ip).bind=r.vlan; } });
+    vlanByIp.forEach((v,ip)=>{ const vals=[...new Set(Object.values(v))]; if(vals.length>1)
+      push({severity:"Warning", type:"VLAN ไม่ตรงกัน", ip, vlan:vals.join(" / "),
+        desc:"VLAN ต่างกันระหว่างแหล่งข้อมูล: "+JSON.stringify(v), cause:"Trunk / ข้อมูลคนละเวลา / misconfig", evidence:[]}); });
+
+    // 15.12 extra anomalies
+    // MAC both static and dynamic
+    const dyn=new Set(ds.macTable.filter(r=>r.type==="DYNAMIC").map(r=>r.mac));
+    const stat=new Set([...ds.macTable.filter(r=>r.type==="STATIC"||r.type==="SECURE").map(r=>r.mac),...ds.staticArp.map(r=>r.mac)]);
+    dyn.forEach(m=>{ if(stat.has(m)) push({severity:"Info", type:"MAC เป็นทั้ง Static และ Dynamic", mac:m,
+      desc:m+" ปรากฏทั้งแบบ static/secure และ dynamic", cause:"Config ซ้ำ", evidence:[]}); });
+    // duplicate DHCP binding
+    const seenBind=new Map(); ds.dhcpBindings.forEach(b=>{ const k=b.ip; if(seenBind.has(k)&&seenBind.get(k)!==b.mac)
+      push({severity:"Warning", type:"DHCP Binding ซ้ำ", ip:b.ip, mac:b.mac, desc:"IP "+b.ip+" มีหลาย binding", cause:"Stale binding", evidence:b.evidence}); seenBind.set(k,b.mac); });
+    // duplicate excluded
+    const exSeen=new Set(); ds.excluded.forEach(e=>{ const k=e.start+"-"+e.end; if(exSeen.has(k))
+      push({severity:"Info", type:"Excluded Address ซ้ำ", ip:e.start+" – "+e.end, desc:"excluded-address ซ้ำ", cause:"Config ซ้ำ", evidence:e.evidence}); exSeen.add(k); });
+    // duplicate / overlapping pool networks
+    for(let i=0;i<ds.dhcpPools.length;i++)for(let j=i+1;j<ds.dhcpPools.length;j++){
+      const a=ds.dhcpPools[i],b=ds.dhcpPools[j]; if(!a.network||!b.network||a.prefix==null||b.prefix==null)continue;
+      if(a.network===b.network && a.prefix===b.prefix) push({severity:"Warning", type:"DHCP Pool Network ซ้ำ",
+        desc:"Pool "+a.name+" และ "+b.name+" ใช้ network เดียวกัน ("+a.network+"/"+a.prefix+")", cause:"Config ซ้ำ", evidence:[...(a.evidence||[]),...(b.evidence||[])]});
+      else if(IPv4Utils.isIpInSubnet(a.network,b.network,Math.min(a.prefix,b.prefix)))
+        push({severity:"Warning", type:"DHCP Pool Network ทับกัน", desc:"Pool "+a.name+" ทับ "+b.name, cause:"Subnet overlap", evidence:[]});
+    }
+    // VLAN id out of range
+    const vlanSources=[...ds.arp,...ds.snoopBindings,...ds.macTable].filter(r=>r.vlan!=null);
+    vlanSources.forEach(r=>{ if(r.vlan<1||r.vlan>4094) push({severity:"Warning", type:"VLAN ID นอกช่วง 1–4094", vlan:r.vlan, ip:r.ip||null, mac:r.mac||null, desc:"VLAN "+r.vlan+" ไม่ถูกต้อง", cause:"Parsing / config", evidence:r.evidence}); });
+    // incomplete ARP
+    ds.arp.filter(r=>r.incomplete).forEach(r=>push({severity:"Info", type:"ARP Incomplete", ip:r.ip, device:r.device,
+      desc:r.ip+" ARP entry incomplete", cause:"อุปกรณ์ไม่ตอบ ARP", evidence:r.evidence}));
+    // port-security max < secure macs
+    (ds.security.portSecurity.interfaces||[]).forEach(p=>{ if(p.current>p.max)
+      push({severity:"Warning", type:"Secure MAC เกิน Maximum", iface:p.iface, device:p.device, desc:p.iface+" มี secure MAC "+p.current+" เกิน max "+p.max, cause:"Config", evidence:p.evidence}); });
+    // DAI on but snooping off in same vlan
+    if(ds.security.dai.enabled && ds.security.dhcpSnooping.detected && !ds.security.dhcpSnooping.enabled)
+      push({severity:"Warning", type:"DAI เปิด แต่ DHCP Snooping ไม่เปิด", desc:"Dynamic ARP Inspection ต้องพึ่ง DHCP snooping binding", cause:"Snooping ไม่เปิด", evidence:[]});
+    // IPSG on but no binding
+    if(ds.security.ipsg.enabled && ds.dhcpBindings.length===0 && ds.snoopBindings.length===0 && ds.sourceBinding.length===0)
+      push({severity:"Warning", type:"IP Source Guard เปิด แต่ไม่มี Binding", desc:"IPSG จะบล็อกทุก traffic หากไม่มี binding", cause:"ไม่มี snooping/source binding", evidence:[]});
+    // err-disabled but MAC still active
+    ds.errDisabled.forEach(e=>{ const active=ds.macTable.find(r=>r.port===e.port);
+      if(active) push({severity:"Info", type:"Err-disabled แต่ยังพบ MAC Active", iface:e.port, mac:active.mac, device:e.device, desc:e.port+" err-disabled แต่ยังพบ MAC ใน table", cause:"ข้อมูลคนละเวลา", evidence:e.evidence}); });
+    // duplicate gateway across vlans
+    const gwMap=new Map(); ds.interfaces.forEach(i=>{ if(i.ip&&/Vlan/i.test(i.iface||"")){ if(gwMap.has(i.ip)) push({severity:"Info", type:"Gateway ซ้ำหลาย VLAN", ip:i.ip, desc:"IP "+i.ip+" เป็น gateway ของหลาย interface", cause:"Config", evidence:i.evidence}); gwMap.set(i.ip,i.iface); } });
+    // high error counters from logs (link flap)
+    const linkFlaps={}; ds.logs.filter(l=>l.type==="LINK"&&l.port).forEach(l=>{ linkFlaps[l.port]=(linkFlaps[l.port]||0)+1; });
+    Object.entries(linkFlaps).forEach(([p,c])=>{ if(c>=3) push({severity:"Warning", type:"Link Flapping", iface:p, desc:p+" link up/down ×"+c, cause:"สาย/SFP/อุปกรณ์ปลายทาง", evidence:[]}); });
+
+    // reservation-specific issues detected during post-processing
+    (ds.reservationIssues||[]).forEach(r=>push(r));
+
+    ds.analysis.conflicts=C;
+  }
+};
+
+/* =====================================================================
+   SecurityScore — 0..100 from detected/enabled features
+   ===================================================================== */
+const SecurityScore = {
+  compute(ds){
+    const s=ds.security; const rows=[]; let score=0, max=0;
+    const add=(name,detected,enabled,weight,vlanIf,details,risk)=>{
+      max+=weight;
+      let status,cls;
+      if(!detected){ status="Not Detected"; cls="p-gray"; }
+      else if(enabled){ status="Protected"; cls="p-green"; score+=weight; }
+      else { status="Disabled"; cls="p-red"; }
+      rows.push({feature:name,status,cls,vlanIf,details,risk:risk||(enabled?"Low":detected?"High":"Unknown")});
+    };
+    add("DHCP Snooping", s.dhcpSnooping.detected, s.dhcpSnooping.enabled, 20,
+      s.dhcpSnooping.vlans||"—", "Trusted: "+(s.dhcpSnooping.trusted.length)+" / Untrusted: "+(s.dhcpSnooping.untrusted.length));
+    add("Dynamic ARP Inspection", s.dai.detected, s.dai.enabled, 15,
+      s.dai.vlans.map(v=>v.vlan).join(",")||"—", "Dropped: "+(s.dai.dropped!=null?s.dai.dropped:"—"));
+    add("IP Source Guard", s.ipsg.detected, s.ipsg.enabled, 10,
+      s.ipsg.interfaces.map(i=>i.iface).join(",")||"—", "Interfaces: "+s.ipsg.interfaces.length);
+    add("Port Security", s.portSecurity.detected, s.portSecurity.enabled, 20,
+      s.portSecurity.interfaces.map(i=>i.iface).slice(0,4).join(",")||"—",
+      "Interfaces: "+s.portSecurity.interfaces.length+" / Secure MAC: "+s.portSecurity.secureMacs.length);
+    add("802.1X", s.dot1x.detected, s.dot1x.enabled, 10, "—",
+      "Sessions: "+ds.authSessions.filter(a=>a.method==="dot1x").length);
+    add("MAB", s.mab.detected, s.mab.enabled, 5, "—", "Sessions: "+ds.authSessions.filter(a=>a.method==="mab").length);
+    add("ACL", s.acl.detected, s.acl.lists.length>0, 10, s.acl.lists.map(l=>l.name).join(",")||"—",
+      "Lists: "+s.acl.lists.length+" (permit/deny counted)");
+    const aaa=s.aaa||{detected:false,enabled:false,servers:0};
+    add("AAA / TACACS+", aaa.detected, aaa.enabled, 10, "Device",
+      "TACACS servers: "+(aaa.servers||0));
+    // score relative to detected features only would be misleading; use absolute of applicable
+    const pct = max>0?Math.round(score/max*100):0;
+    ds.analysis.security={rows, score:pct, scoreRaw:score, scoreMax:max};
+  }
+};
+
+/* =====================================================================
+   SnapshotManager — save/compare snapshots in localStorage
+   ===================================================================== */
+const LS={ get(k,d){ try{const v=localStorage.getItem("sipa_"+k);return v?JSON.parse(v):d;}catch(e){return d;} },
+  set(k,v){ try{localStorage.setItem("sipa_"+k,JSON.stringify(v));}catch(e){} },
+  del(k){ try{localStorage.removeItem("sipa_"+k);}catch(e){} },
+  allKeys(){ return Object.keys(localStorage).filter(k=>k.startsWith("sipa_")); } };
+
+const SnapshotManager = {
+  snapshotFrom(ds){
+    // compact, serializable representation
+    return { time:ds.timestamp,
+      used:[...ds.analysis.used.values()].map(u=>({ip:u.ip,macs:[...u.macs],vlans:[...u.vlans],
+        ifaces:[...u.ifaces],devices:[...u.devices],statuses:[...u.statuses]})),
+      bindings:ds.dhcpBindings.map(b=>({ip:b.ip,mac:b.mac})),
+      macTable:ds.macTable.map(m=>({mac:m.mac,port:m.port,vlan:m.vlan,device:m.device})),
+      blocked:ds.analysis.blocked.map(b=>({ip:b.ip||null,mac:b.mac||null,port:b.port||null,status:b.status})),
+      conflicts:ds.analysis.conflicts.map(c=>({type:c.type,ip:c.ip||null,mac:c.mac||null})) };
+  },
+  save(slot,ds){ if(!ds||!ds.analysis){ showToast("ยังไม่มีผลวิเคราะห์ให้บันทึก","warn"); return; }
+    LS.set("snap"+slot,this.snapshotFrom(ds)); showToast("บันทึก Snapshot "+slot+" แล้ว","ok"); UIController.refreshSnapshotInfo(); },
+  load(slot){ return LS.get("snap"+slot,null); },
+  clear(slot){ LS.del("snap"+slot); showToast("ลบ Snapshot "+slot+" แล้ว","ok"); UIController.refreshSnapshotInfo(); },
+  prevActiveSet(){ const a=LS.get("snapA",null); if(!a)return null; return new Set(a.used.map(u=>u.ip)); },
+  compare(){
+    const A=this.load("A"), B=this.load("B");
+    if(!A||!B) return null;
+    const rows=[];
+    const usedA=new Map(A.used.map(u=>[u.ip,u])), usedB=new Map(B.used.map(u=>[u.ip,u]));
+    usedB.forEach((u,ip)=>{ if(!usedA.has(ip)) rows.push({change:"IP เพิ่ง Active",before:"—",after:ip,severity:"Info"}); });
+    usedA.forEach((u,ip)=>{ if(!usedB.has(ip)) rows.push({change:"IP หายไป",before:ip,after:"—",severity:"Warning"}); });
+    usedB.forEach((u,ip)=>{ const a=usedA.get(ip); if(a){ const am=(a.macs[0]||""),bm=(u.macs[0]||"");
+      if(am&&bm&&am!==bm) rows.push({change:"IP เปลี่ยน MAC",before:ip+" → "+am,after:ip+" → "+bm,severity:"Critical"}); } });
+    const macA=new Map(A.macTable.map(m=>[m.mac,m.port])), macB=new Map(B.macTable.map(m=>[m.mac,m.port]));
+    macB.forEach((port,mac)=>{ if(!macA.has(mac)) rows.push({change:"MAC ใหม่",before:"—",after:mac,severity:"Info"});
+      else if(macA.get(mac)!==port) rows.push({change:"MAC เปลี่ยน Port",before:mac+" @ "+macA.get(mac),after:mac+" @ "+port,severity:"Warning"}); });
+    macA.forEach((port,mac)=>{ if(!macB.has(mac)) rows.push({change:"MAC หาย",before:mac,after:"—",severity:"Info"}); });
+    const bindA=new Set(A.bindings.map(b=>b.ip)), bindB=new Set(B.bindings.map(b=>b.ip));
+    bindB.forEach(ip=>{ if(!bindA.has(ip)) rows.push({change:"DHCP Lease ใหม่",before:"—",after:ip,severity:"Info"}); });
+    bindA.forEach(ip=>{ if(!bindB.has(ip)) rows.push({change:"DHCP Lease หมด",before:ip,after:"—",severity:"Info"}); });
+    const key=x=>[x.ip,x.mac,x.port,x.status].join("|");
+    const blkA=new Set(A.blocked.map(key)), blkB=new Set(B.blocked.map(key));
+    B.blocked.forEach(b=>{ if(!blkA.has(key(b))) rows.push({change:"Blocked Client ใหม่",before:"—",after:(b.ip||b.mac||b.port)+" "+b.status,severity:"Warning"}); });
+    const cfA=new Set(A.conflicts.map(c=>c.type+"|"+(c.ip||c.mac))), cfB=new Set(B.conflicts.map(c=>c.type+"|"+(c.ip||c.mac)));
+    B.conflicts.forEach(c=>{ if(!cfA.has(c.type+"|"+(c.ip||c.mac))) rows.push({change:"Conflict ใหม่",before:"—",after:c.type+" "+(c.ip||c.mac||""),severity:"Warning"}); });
+    return {rows,timeA:A.time,timeB:B.time};
+  },
+  swap(){ const a=this.load("A"),b=this.load("B"); if(a)LS.set("snapB",a); else LS.del("snapB");
+    if(b)LS.set("snapA",b); else LS.del("snapA"); showToast("สลับ Snapshot แล้ว","ok"); }
+};
+
+/* =====================================================================
+   ExportManager — CSV / JSON / TXT / HTML report
+   ===================================================================== */
+const ExportManager = {
+  csv(rows,name){ downloadFile(toCSV(rows),name,"text/csv"); showToast("ส่งออก CSV แล้ว","ok"); },
+  json(obj,name){ downloadFile(JSON.stringify(obj,null,2),name,"application/json"); showToast("ส่งออก JSON แล้ว","ok"); },
+  txtSummary(ds){
+    const a=ds.analysis; const L=[];
+    L.push("Smart IP, DHCP & Security Analyzer — Summary");
+    L.push("Analysis date: "+new Date(ds.timestamp).toLocaleString());
+    L.push("Devices: "+ds.devices.size+"  Networks: "+ds.networks.length);
+    L.push("Used IPs: "+a.used.size+"  Likely Free: "+a.free.filter(f=>f.score>=50).length+"  Reserved: "+[...a.reserved.keys()].length);
+    L.push("DHCP Pools: "+a.pools.length+"  Blocked/Denied: "+a.blocked.length+"  Conflicts: "+a.conflicts.length);
+    L.push("Security Score: "+a.security.score+"%");
+    L.push("Parsing warnings: "+ds.warnings.length);
+    L.push("");
+    L.push("DISCLAIMER: Likely-free IPs are not guaranteed free. Verify before use.");
+    downloadFile(L.join("\n"),"analysis-summary.txt","text/plain"); showToast("ส่งออก TXT แล้ว","ok");
+  },
+  htmlReport(ds){
+    const a=ds.analysis; const esc=escapeHtml;
+    const tbl=(head,rows)=>`<table border=1 cellspacing=0 cellpadding=5 style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    const html=`<!DOCTYPE html><html><head><meta charset=utf-8><title>Analysis Report</title>
+<style>body{font-family:Segoe UI,sans-serif;max-width:1000px;margin:20px auto;color:#111;padding:0 16px}h1{color:#0a5}h2{border-bottom:2px solid #0bd;padding-bottom:4px;margin-top:28px}.warn{background:#fff8e1;border:1px solid #fbc02d;padding:10px;border-radius:6px}</style></head><body>
+<h1>Smart IP, DHCP &amp; Security Analyzer — Report</h1>
+<p>Analysis date: ${esc(new Date(ds.timestamp).toLocaleString())}</p>
+<h2>Summary</h2>
+<ul><li>Devices: ${ds.devices.size}</li><li>Networks: ${ds.networks.length}</li>
+<li>Used IPs: ${a.used.size}</li><li>Likely Free (score ≥50): ${a.free.filter(f=>f.score>=50).length}</li>
+<li>Reserved: ${[...a.reserved.keys()].length}</li><li>DHCP Pools: ${a.pools.length}</li>
+<li>Blocked / Denied: ${a.blocked.length}</li><li>Conflicts / Anomalies: ${a.conflicts.length}</li>
+<li>Security Score: ${a.security.score}%</li><li>Parsing warnings: ${ds.warnings.length}</li></ul>
+<h2>Networks</h2>${tbl(["Network","VLAN","Gateway","Usable"],ds.networks.map(n=>[n.cidr,n.vlan??"—",n.gateway||"—",n.usable]))}
+<h2>Used IPs</h2>${tbl(["IP","MAC","VLAN","Device","Status","Source"],[...a.used.values()].map(u=>[u.ip,[...u.macs][0]||"—",[...u.vlans].join(",")||"—",[...u.devices].join(",")||"—",[...u.statuses].join(", "),[...u.sources].join(", ")]))}
+<h2>DHCP Pools</h2>${tbl(["Pool","Network","Total","Leased","Available","Usage%","Status"],a.pools.map(p=>[p.name,p.network||"—",p.total??"—",p.leased??"—",p.available??"—",p.usage??"—",p.status]))}
+<h2>Security</h2>${tbl(["Feature","Status","Details"],a.security.rows.map(r=>[r.feature,r.status,r.details]))}
+<h2>Blocked / Denied</h2>${tbl(["IP","MAC","Port","Status","Reason","Feature"],a.blocked.map(b=>[b.ip||"—",b.mac||"—",b.port||"—",b.status,b.reason,b.feature]))}
+<h2>Conflicts &amp; Anomalies</h2>${tbl(["Severity","Type","IP","MAC","Description"],a.conflicts.map(c=>[c.severity,c.type,c.ip||"—",c.mac||"—",c.desc]))}
+<h2>Parsing Warnings</h2><ul>${ds.warnings.map(w=>`<li>${esc(w.msg)}</li>`).join("")||"<li>None</li>"}</ul>
+<div class="warn"><b>Disclaimer:</b> IP ที่ไม่พบใน ARP หรือ DHCP ไม่ได้หมายความว่าว่าง 100% ควรตรวจสอบซ้ำก่อนใช้งานจริง เครื่องมือนี้วิเคราะห์จากข้อความที่ผู้ใช้วางเท่านั้น</div>
+</body></html>`;
+    downloadFile(html,"analysis-report.html","text/html"); showToast("ส่งออก HTML Report แล้ว","ok");
+  }
+};
+
+/* =====================================================================
+   SAMPLE DATA (realistic; triggers every detector)
+   ===================================================================== */
+const SAMPLE_DATA = `CORE-SW01#show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+Vlan2                  10.36.2.1       YES manual up                    up
+Vlan10                 10.36.10.1      YES manual up                    up
+GigabitEthernet1/0/1   unassigned      YES unset  up                    up
+
+CORE-SW01#show running-config | section dhcp
+ip dhcp excluded-address 10.36.2.1 10.36.2.20
+ip dhcp pool VLAN2_USERS
+ network 10.36.2.0 255.255.255.0
+ default-router 10.36.2.1
+ dns-server 10.20.100.2 10.26.100.2
+ lease 0 8
+
+CORE-SW01#show running-config | include ^ip source binding
+ip source binding aabb.ccdd.eeff vlan 2 10.36.2.90 interface Gi1/0/22
+
+CORE-SW01#show ip arp
+Protocol Address       Age (min) Hardware Addr  Type Interface
+Internet 10.36.2.1     -         0011.2233.4455 ARPA Vlan2
+Internet 10.36.2.50    2         6c3b.e524.91f8 ARPA Vlan2
+Internet 10.36.2.60    1         aabb.ccdd.eeff ARPA Vlan2
+Internet 10.36.2.60    0         1122.3344.5566 ARPA Vlan2
+Internet 10.36.2.90    5         aabb.ccdd.eeff ARPA Vlan2
+
+CORE-SW01#show ip dhcp binding
+Bindings from all pools:
+IP address      Client-ID/Hardware address      Lease expiration        Type
+10.36.2.50      0100.6c3b.e524.91f8             Mar 2 2026 10:15 AM     Automatic
+10.36.2.70      0100.aaaa.bbbb.cccc             Mar 2 2026 11:00 AM     Automatic
+10.36.2.1       0100.dead.beef.0001             Infinite                Automatic
+
+CORE-SW01#show ip dhcp conflict
+IP address       Detection method       Detection time
+10.36.2.80       Ping                   Mar 1 2026 10:30 AM
+
+CORE-SW01#show mac address-table
+          Mac Address Table
+-------------------------------------------
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+   2    6c3b.e524.91f8    DYNAMIC     Gi1/0/12
+   2    aabb.ccdd.eeff    DYNAMIC     Gi1/0/20
+  10    aaaa.bbbb.cccc    DYNAMIC     Gi1/0/24
+
+CORE-SW01#show ip dhcp snooping
+Switch DHCP snooping is enabled
+DHCP snooping is configured on following VLANs:
+2,10
+Interface                  Trusted
+------------------------   -------
+GigabitEthernet1/0/1       yes
+GigabitEthernet1/0/12      no
+
+CORE-SW01#show ip arp inspection vlan 2
+ Vlan     Configuration    Operation
+ ----     -------------    ---------
+    2     Enabled          Active
+
+CORE-SW01#show port-security
+Secure Port  MaxSecureAddr  CurrentAddr  SecurityViolation  Security Action
+Gi1/0/15         2              2                3            Shutdown
+Gi1/0/20         1              1                0            Restrict
+
+CORE-SW01#show interfaces status err-disabled
+Port      Name               Status       Reason
+Gi1/0/15                     err-disabled psecure-violation
+
+CORE-SW01#show authentication sessions
+Interface    MAC Address     Method  Domain  Status
+Gi1/0/24     aaaa.bbbb.cccc  dot1x   DATA    Authz Success
+Gi1/0/25     dddd.eeee.ffff  mab     DATA    Unauthorized
+
+CORE-SW01#show logging
+%SW_MATM-4-MACFLAP_NOTIF: Host 6c3b.e524.91f8 in vlan 2 is flapping between port Gi1/0/12 and port Gi1/0/20
+%SW_DAI-4-DHCP_SNOOPING_DENY: 1 Invalid ARPs on Gi1/0/20, vlan 2.([1122.3344.5566/10.36.2.60])
+%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC aabb.ccdd.eeff on port Gi1/0/15
+
+CORE-SW01#show cdp neighbors detail
+Device ID: ACCESS-SW02.local
+Interface: GigabitEthernet1/0/1,  Port ID (outgoing port): GigabitEthernet0/1
+`;
+
+/* =====================================================================
+   UIController — DOM rendering, tabs, tables, drawers, events.
+   Uses textContent / DocumentFragment; only escaped HTML via innerHTML.
+   ===================================================================== */
+const TABS=[
+  ["overview","Overview"],["used","Used IPs"],["free","Likely Free IPs"],["reserved","Reserved"],
+  ["unknown","Unknown / Verify"],["pools","DHCP Pools"],["security","Security"],["blocked","Blocked / Denied"],
+  ["conflict","Conflict & Anomaly"],["mac2port","MAC to Port"],["snapshot","Snapshot Compare"],
+  ["commands","Commands"],["evidence","Raw Evidence"]
+];
+
+const UIController = {
+  ds:null,
+  state:{ activeTab:LS.get("lastTab","overview"), selectedNet:"__all__",
+    page:{}, search:{}, sort:{}, filter:{} },
+
+  boot(){
+    // theme
+    const theme=LS.get("theme","dark"); document.documentElement.setAttribute("data-theme",theme); this.updateThemeIcon(theme);
+    this.buildTabs();
+    this.renderEmptyAll();
+    this.wire();
+    this.refreshSnapshotInfo();
+    this.showTab(this.state.activeTab);
+    // run self-test silently, expose to console
+    const st=SelfTest.run(); console.info("[Self-Test] "+st.passed+"/"+st.total+" passed");
+  },
+
+  wire(){
+    const $=id=>document.getElementById(id);
+    const inp=$("input");
+    inp.addEventListener("input",debounce(()=>this.updateInputStats(),200));
+    $("btnAnalyze").addEventListener("click",()=>this.analyze());
+    $("btnClear").addEventListener("click",()=>{ inp.value=""; this.updateInputStats(); this.ds=null; this.renderEmptyAll(); this.renderSummaryEmpty(); this.renderNetworkZone(); showToast("ล้างข้อมูลแล้ว","ok"); });
+    $("btnExample").addEventListener("click",()=>{ inp.value=SAMPLE_DATA; this.updateInputStats(); this.analyze(); });
+    $("btnExample2").addEventListener("click",()=>{ inp.value=SAMPLE_DATA; this.updateInputStats(); this.analyze(); });
+    $("btnImport").addEventListener("click",()=>$("fileInput").click());
+    $("fileInput").addEventListener("change",e=>this.handleFile(e.target.files[0]));
+    $("btnCmds").addEventListener("click",()=>this.showCommandsModal());
+    $("btnHelp").addEventListener("click",()=>this.showHelpModal());
+    $("btnTheme").addEventListener("click",()=>this.toggleTheme());
+    $("btnSaveSnap").addEventListener("click",()=>this.showSnapshotSaveModal());
+    // drawer/modal close
+    $("overlay").addEventListener("click",()=>this.closeAll());
+    $("drawerClose").addEventListener("click",()=>this.closeAll());
+    $("modalClose").addEventListener("click",()=>this.closeAll());
+    document.addEventListener("keydown",e=>{ if(e.key==="Escape")this.closeAll(); });
+    // drag & drop
+    const dz=$("dropzone");
+    ["dragenter","dragover"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add("drag");}));
+    ["dragleave","drop"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove("drag");}));
+    dz.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f)this.handleFile(f); });
+  },
+
+  handleFile(file){
+    if(!file) return;
+    const okExt=/\.(txt|log|cfg|conf|text)$/i.test(file.name);
+    if(!okExt){ showToast("รองรับเฉพาะ .txt .log .cfg","err"); return; }
+    if(file.size>5*1024*1024){ showToast("ไฟล์ใหญ่เกิน 5 MB","err"); return; }
+    const r=new FileReader();
+    r.onload=()=>{ document.getElementById("input").value=r.result; this.updateInputStats(); this.analyze(); };
+    r.onerror=()=>showToast("อ่านไฟล์ไม่สำเร็จ","err");
+    r.readAsText(file);
+  },
+
+  updateInputStats(){
+    const t=document.getElementById("input").value;
+    const lines=t?t.split("\n").length:0;
+    let blocks=t?detectCommandBlocks(t):[];
+    // if no prompt-anchored command blocks, fall back to content sniffing so the
+    // counters reflect what will actually be parsed on Analyze
+    if(t && blocks.reduce((n,b)=>n+(b.command?1:0),0)===0){
+      const dev=(t.match(/(?:^|\n)\s*([A-Za-z0-9][A-Za-z0-9._\-]{2,62})[#>]\s*$/)||[])[1]||"DEVICE";
+      const sn=sniffBlocks(t,dev); if(sn.length) blocks=sn;
+    }
+    const devices=new Set(blocks.map(b=>b.device)); devices.delete("UNKNOWN");
+    document.getElementById("stLines").textContent=lines;
+    document.getElementById("stDevices").textContent=devices.size;
+    document.getElementById("stBlocks").textContent=blocks.length;
+    document.getElementById("stSize").textContent=(new Blob([t]).size/1024).toFixed(1)+" KB";
+  },
+
+  analyze(){
+    const t=document.getElementById("input").value;
+    if(!t.trim()){ showToast("กรุณาวางผลลัพธ์จากอุปกรณ์ก่อน","warn"); return; }
+    let ds;
+    try{ ds=analyzeText(t); }catch(e){ console.error(e); showToast("เกิดข้อผิดพลาดในการวิเคราะห์: "+e.message,"err"); return; }
+    this.ds=ds;
+    // errors / guidance
+    if(ds.networks.length===0) showToast("ไม่พบ Network หรือ Subnet — กรอกเองได้ที่ Network Selector","warn");
+    if(ds.arp.length===0 && ds.dhcpBindings.length===0) showToast("ไม่พบ ARP หรือ DHCP Binding — ความมั่นใจ Free IP จะจำกัด","warn");
+    if(ds.analysis.enumWarn) showToast("บาง Network ใหญ่เกิน /19 — ข้ามการ Enumerate ทุก IP","warn");
+    this.state.selectedNet="__all__";
+    this.renderSummary();
+    this.renderNetworkZone();
+    this.renderAllTabs();
+    LS.set("lastNet",this.state.selectedNet);
+    const rc=document.getElementById("resultCard"); if(rc.scrollIntoView) try{rc.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
+    showToast("วิเคราะห์เสร็จ: "+ds.devices.size+" device, "+ds.networks.length+" network","ok");
+  },
+
+  /* ---------- summary ---------- */
+  renderSummaryEmpty(){ document.getElementById("summaryZone").innerHTML=""; },
+  renderSummary(){
+    const a=this.ds.analysis; const ds=this.ds;
+    const cards=[
+      ["Detected Devices",ds.devices.size,"cyan","commands"],
+      ["Detected Commands",Object.keys(ds.commands).length,"blue","commands"],
+      ["Networks",ds.networks.length,"cyan","overview"],
+      ["Total Usable IPs",a.totalUsable,"blue","overview"],
+      ["Used IPs",a.used.size,"green","used"],
+      ["Likely Free IPs",a.free.filter(f=>f.score>=50).length,"cyan","free"],
+      ["Reserved IPs",[...a.reserved.keys()].length,"purple","reserved"],
+      ["Unknown IPs",a.unknown.length,"gray","unknown"],
+      ["DHCP Pools",a.pools.length,"blue","pools"],
+      ["Security Features",a.security.rows.filter(r=>r.status==="Protected").length+"/"+a.security.rows.length,"green","security"],
+      ["Blocked / Denied",a.blocked.length,"red","blocked"],
+      ["Conflicts / Anomalies",a.conflicts.length,"yellow","conflict"],
+      ["Security Score",a.security.score+"%","cyan","security"],
+      ["Parsing Warnings",ds.warnings.length,"gray","commands"]
+    ];
+    const html='<div class="summary-grid">'+cards.map(([lbl,val,cls,tab])=>
+      `<div class="scard c-${cls}" data-tab="${tab}" tabindex="0" role="button" aria-label="${escapeHtml(lbl)}: ${escapeHtml(String(val))}">
+        <div class="lbl">${escapeHtml(lbl)}</div><div class="val">${escapeHtml(String(val))}</div></div>`).join("")+'</div>';
+    document.getElementById("summaryZone").innerHTML=html;
+    document.querySelectorAll("#summaryZone .scard").forEach(c=>{
+      const go=()=>this.showTab(c.dataset.tab);
+      c.addEventListener("click",go);
+      c.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();go();} });
+    });
+  },
+
+  /* ---------- network selector ---------- */
+  renderNetworkZone(){
+    const zone=document.getElementById("networkZone");
+    if(!this.ds){ zone.innerHTML=""; return; }
+    const nets=this.ds.networks;
+    let opts=`<option value="__all__">ทุก Network (${nets.length})</option>`+
+      nets.map(n=>`<option value="${n.cidr}">${escapeHtml(n.cidr)}${n.vlan!=null?" — VLAN "+n.vlan:""}</option>`).join("");
+    const sel=this.state.selectedNet;
+    const cur=nets.find(n=>n.cidr===sel);
+    let info="";
+    if(cur){
+      const si=[["Network",cur.network],["CIDR","/"+cur.prefix],["Subnet Mask",cur.maskStr],["Broadcast",cur.broadcast],
+        ["First Host",cur.firstHost],["Last Host",cur.lastHost],["Total",cur.total],["Usable",cur.usable],
+        ["Gateway",cur.gateway||"—"],["VLAN",cur.vlan!=null?cur.vlan:"—"]];
+      info='<div class="subnet-info">'+si.map(([k,v])=>`<div class="si"><div class="k">${k}</div><div class="v">${escapeHtml(String(v))}</div></div>`).join("")+'</div>';
+    }
+    zone.innerHTML=`<div class="card" style="margin-top:16px"><div class="selector-row">
+      <label for="netsel">Network:</label>
+      <select id="netsel" aria-label="เลือก Network">${opts}</select>
+      <label for="manualNet">หรือกรอกเอง:</label>
+      <input id="manualNet" placeholder="เช่น 10.36.2.0/24" aria-label="กรอก Network เอง" style="max-width:170px">
+      <button class="btn sm" id="applyManual">ใช้</button>
+      </div>${info}</div>`;
+    const s=document.getElementById("netsel"); s.value=sel;
+    s.addEventListener("change",()=>{ this.state.selectedNet=s.value; LS.set("lastNet",s.value); this.renderNetworkZone(); this.renderAllTabs(); });
+    document.getElementById("applyManual").addEventListener("click",()=>{
+      const v=document.getElementById("manualNet").value.trim(); const m=v.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/);
+      if(!m||!IPv4Utils.isValidIPv4(m[1])||+m[2]<0||+m[2]>32){ showToast("รูปแบบ Network ไม่ถูกต้อง (เช่น 10.36.2.0/24)","err"); return; }
+      const sub=IPv4Utils.calculateSubnet(m[1],+m[2]);
+      if(!this.ds.networks.find(n=>n.cidr===sub.cidr)){ this.ds.networks.push({...sub,vlan:null,gateway:null,sources:["Manual"],evidence:[]});
+        this.ds.networks.sort((a,b)=>a.networkNum-b.networkNum); computeFreeAndSummary(this.ds); ConflictDetector.run(this.ds); }
+      this.state.selectedNet=sub.cidr; this.renderSummary(); this.renderNetworkZone(); this.renderAllTabs(); showToast("เพิ่ม Network "+sub.cidr,"ok");
+    });
+  },
+
+  netFilter(ip){
+    const sel=this.state.selectedNet; if(sel==="__all__"||!ip) return true;
+    const n=this.ds.networks.find(x=>x.cidr===sel); if(!n) return true;
+    return IPv4Utils.isIpInSubnet(ip,n.network,n.prefix);
+  },
+
+  /* ---------- tabs ---------- */
+  buildTabs(){
+    const bar=document.getElementById("tabbar"); const panes=document.getElementById("tabpanes");
+    bar.innerHTML=TABS.map(([id,label])=>`<button class="tab" data-tab="${id}" role="tab" aria-label="${escapeHtml(label)}">
+      <span>${escapeHtml(label)}</span><span class="cnt" id="cnt-${id}" style="display:none">0</span></button>`).join("");
+    panes.innerHTML=TABS.map(([id])=>`<div class="tabpane" id="pane-${id}" role="tabpanel"></div>`).join("");
+    bar.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>this.showTab(t.dataset.tab)));
+  },
+  showTab(id){
+    this.state.activeTab=id; LS.set("lastTab",id);
+    document.querySelectorAll("#tabbar .tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===id));
+    document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active",p.id==="pane-"+id));
+    if(this.ds) this.renderTab(id);
+  },
+  setCount(id,n){ const el=document.getElementById("cnt-"+id); if(!el)return; if(n>0){el.style.display="";el.textContent=n;}else el.style.display="none"; },
+
+  renderEmptyAll(){ TABS.forEach(([id,label])=>{ const p=document.getElementById("pane-"+id);
+    p.innerHTML=this.emptyState("ยังไม่มีข้อมูล","วางผลลัพธ์จากอุปกรณ์แล้วกด Analyze หรือกด Load Example เพื่อดูตัวอย่าง"); }); this.renderSummaryEmpty(); },
+  emptyState(title,msg){
+    return `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg>
+      <h3>${escapeHtml(title)}</h3><p>${escapeHtml(msg)}</p></div>`;
+  },
+  renderAllTabs(){ TABS.forEach(([id])=>this.renderTab(id)); },
+
+  renderTab(id){
+    const fn=this["tab_"+id]; if(fn) fn.call(this);
+  },
+
+  /* Reusable data table with search / filter / sort / pagination / export.
+     cols: [{key,label,mono,html(row)|text(row),sortVal(row)}]  */
+  table(paneId,tabId,cols,rows,opts={}){
+    const pane=document.getElementById("pane-"+paneId);
+    if(!rows.length){ pane.innerHTML=this.emptyState(opts.emptyTitle||"ไม่พบข้อมูล",opts.emptyMsg||"ไม่มีรายการในหมวดนี้จากข้อมูลที่วิเคราะห์"); return; }
+    const st=this.state; st.search[tabId]=st.search[tabId]||""; st.sort[tabId]=st.sort[tabId]||{key:null,dir:1};
+    st.page[tabId]=st.page[tabId]||{n:1,size:25}; st.filter[tabId]=st.filter[tabId]||{};
+    // filter
+    let data=rows.slice();
+    (opts.filters||[]).forEach(f=>{ const v=st.filter[tabId][f.key]; if(v&&v!=="__all__") data=data.filter(r=>String(f.val?f.val(r):r[f.key])===v); });
+    // search
+    const q=st.search[tabId].toLowerCase();
+    if(q){ data=data.filter(r=>cols.some(c=>{ const t=(c.text?c.text(r):r[c.key]); return t!=null&&String(t).toLowerCase().includes(q); })); }
+    // sort
+    const so=st.sort[tabId];
+    if(so.key){ const c=cols.find(x=>x.key===so.key);
+      data.sort((a,b)=>{ let va=c.sortVal?c.sortVal(a):(c.text?c.text(a):a[so.key]); let vb=c.sortVal?c.sortVal(b):(c.text?c.text(b):b[so.key]);
+        if(typeof va==="number"&&typeof vb==="number") return (va-vb)*so.dir;
+        return String(va??"").localeCompare(String(vb??""))*so.dir; }); }
+    const total=data.length; const pg=st.page[tabId]; const pages=Math.max(1,Math.ceil(total/pg.size));
+    if(pg.n>pages)pg.n=pages;
+    const slice=data.slice((pg.n-1)*pg.size,pg.n*pg.size);
+    // build toolbar
+    const filterHtml=(opts.filters||[]).map(f=>{ const cur=st.filter[tabId][f.key]||"__all__";
+      const uniq=[...new Set(rows.map(r=>String(f.val?f.val(r):r[f.key])).filter(v=>v&&v!=="null"&&v!=="undefined"))].sort();
+      return `<select data-filter="${f.key}" aria-label="${escapeHtml(f.label)}"><option value="__all__">${escapeHtml(f.label)}: ทั้งหมด</option>${uniq.map(u=>`<option value="${escapeHtml(u)}" ${u===cur?"selected":""}>${escapeHtml(u)}</option>`).join("")}</select>`; }).join("");
+    const head=cols.map(c=>{ const arr=so.key===c.key?(so.dir>0?"▲":"▼"):"⇅"; return `<th data-key="${c.key}" class="${c.mono?"mono":""}">${escapeHtml(c.label)} <span class="arr">${arr}</span></th>`; }).join("");
+    const body=slice.map((r,i)=>{ const cells=cols.map(c=>{ const v=c.html?c.html(r):escapeHtml(safe(c.text?c.text(r):r[c.key]));
+        return `<td class="${c.mono?"mono":""}">${v}</td>`; }).join("");
+      return `<tr class="${opts.onRowClick?"clickable":""}" data-idx="${(pg.n-1)*pg.size+i}">${cells}</tr>`; }).join("");
+    pane.innerHTML=`
+      <div class="toolbar">
+        <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+          <input type="text" placeholder="ค้นหา..." value="${escapeHtml(st.search[tabId])}" aria-label="ค้นหาในตาราง"></div>
+        ${filterHtml}
+        <button class="btn sm" data-act="csv"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>CSV</button>
+        <button class="btn sm" data-act="json">JSON</button>
+        <button class="btn sm" data-act="copy">Copy</button>
+        <span style="color:var(--muted);font-size:11.5px">${total} รายการ</span>
+      </div>
+      <div class="tablewrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+      <div class="pagination">
+        <span>หน้า ${pg.n}/${pages}</span>
+        <label>ต่อหน้า <select data-act="size">${[10,25,50,100].map(n=>`<option ${n===pg.size?"selected":""}>${n}</option>`).join("")}</select></label>
+        <button class="btn sm" data-act="prev" ${pg.n<=1?"disabled":""}>ก่อนหน้า</button>
+        <button class="btn sm" data-act="next" ${pg.n>=pages?"disabled":""}>ถัดไป</button>
+      </div>`;
+    // wire
+    const rerender=()=>this.table(paneId,tabId,cols,rows,opts);
+    pane.querySelector(".search input").addEventListener("input",debounce(e=>{ st.search[tabId]=e.target.value; pg.n=1; rerender(); const inp=pane.querySelector(".search input"); if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);} },220));
+    pane.querySelectorAll("thead th").forEach(th=>th.addEventListener("click",()=>{ const k=th.dataset.key;
+      if(so.key===k)so.dir*=-1; else{so.key=k;so.dir=1;} rerender(); }));
+    pane.querySelectorAll("[data-filter]").forEach(sel=>sel.addEventListener("change",()=>{ st.filter[tabId][sel.dataset.filter]=sel.value; pg.n=1; rerender(); }));
+    pane.querySelector('[data-act="prev"]').addEventListener("click",()=>{ if(pg.n>1){pg.n--;rerender();} });
+    pane.querySelector('[data-act="next"]').addEventListener("click",()=>{ if(pg.n<pages){pg.n++;rerender();} });
+    pane.querySelector('[data-act="size"]').addEventListener("change",e=>{ pg.size=+e.target.value; pg.n=1; rerender(); });
+    pane.querySelector('[data-act="csv"]').addEventListener("click",()=>ExportManager.csv([cols.map(c=>c.label),...data.map(r=>cols.map(c=>safe(c.text?c.text(r):(c.raw?c.raw(r):r[c.key]))))],tabId+".csv"));
+    pane.querySelector('[data-act="json"]').addEventListener("click",()=>ExportManager.json(data.map(r=>{const o={};cols.forEach(c=>o[c.key]=c.text?c.text(r):(c.raw?c.raw(r):r[c.key]));return o;}),tabId+".json"));
+    pane.querySelector('[data-act="copy"]').addEventListener("click",async()=>{ const ok=await copyToClipboard(toCSV([cols.map(c=>c.label),...data.map(r=>cols.map(c=>safe(c.text?c.text(r):r[c.key])))])); showToast(ok?"คัดลอกแล้ว":"คัดลอกไม่สำเร็จ",ok?"ok":"err"); });
+    if(opts.onRowClick) pane.querySelectorAll("tbody tr").forEach(tr=>tr.addEventListener("click",()=>opts.onRowClick(data[+tr.dataset.idx])));
+    this.setCount(tabId,rows.length);
+  },
+
+  pill(text,cls){ return `<span class="pill ${cls}">${escapeHtml(text)}</span>`; },
+  sevPill(s){ return this.pill(s,{Critical:"p-red",High:"p-red",Warning:"p-yellow",Info:"p-gray"}[s]||"p-gray"); },
+
+  /* ---------- Overview ---------- */
+  tab_overview(){
+    const a=this.ds.analysis, ds=this.ds; const pane=document.getElementById("pane-overview");
+    const netRows=ds.networks.map(n=>`<tr><td class="mono">${escapeHtml(n.cidr)}</td><td>${safe(n.vlan)}</td><td class="mono">${escapeHtml(safe(n.gateway))}</td><td class="mono">${n.usable}</td><td>${escapeHtml(n.sources.join(", "))}</td></tr>`).join("");
+    const topConf=a.conflicts.filter(c=>c.severity==="Critical").slice(0,6);
+    pane.innerHTML=`
+      <div class="sec-grid" style="margin-bottom:16px">
+        <div class="sec-card"><h4>สรุปเครือข่าย</h4><div class="det">
+          Devices: <span>${ds.devices.size}</span><br>Networks: <span>${ds.networks.length}</span><br>
+          Used IPs: <span>${a.used.size}</span><br>Likely Free (≥50): <span>${a.free.filter(f=>f.score>=50).length}</span><br>
+          Reserved: <span>${[...a.reserved.keys()].length}</span></div></div>
+        <div class="sec-card"><h4>ความปลอดภัย</h4>
+          <div class="score-ring"><div class="ring" style="--p:${a.security.score}"><b>${a.security.score}%</b></div>
+          <div class="det">Protected: <span>${a.security.rows.filter(r=>r.status==="Protected").length}/${a.security.rows.length}</span><br>
+          Blocked/Denied: <span>${a.blocked.length}</span><br>Conflicts: <span>${a.conflicts.length}</span></div></div></div>
+        <div class="sec-card"><h4>คำเตือน Parsing</h4><div class="det">${ds.warnings.length?ds.warnings.slice(0,5).map(w=>escapeHtml(w.msg)).join("<br>"):"ไม่มี"}</div></div>
+      </div>
+      ${ds.networks.length?`<h4 style="margin:6px 0">Networks</h4><div class="tablewrap"><table><thead><tr><th>Network</th><th>VLAN</th><th>Gateway</th><th>Usable</th><th>Source</th></tr></thead><tbody>${netRows}</tbody></table></div>`:this.emptyState("ไม่พบ Network","กรอก Network เองที่ Network Selector ด้านบน")}
+      ${topConf.length?`<h4 style="margin:16px 0 6px">Critical Anomalies</h4>`+topConf.map(c=>`<div class="disclaimer" style="margin:6px 0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 3.9a2 2 0 00-3.4 0z"/></svg><span><b>${escapeHtml(c.type)}:</b> ${escapeHtml(c.desc)}</span></div>`).join(""):""}`;
+    this.setCount("overview",0);
+  },
+
+  /* ---------- Used IPs ---------- */
+  tab_used(){
+    const a=this.ds.analysis;
+    const rows=[...a.used.values()].filter(u=>this.netFilter(u.ip)).sort((x,y)=>IPv4Utils.compareIp(x.ip,y.ip));
+    const cols=[
+      {key:"ip",label:"IP Address",mono:true},
+      {key:"mac",label:"MAC",mono:true,text:u=>[...u.macs][0]||"—"},
+      {key:"vlan",label:"VLAN",text:u=>[...u.vlans].join(",")||"—"},
+      {key:"iface",label:"Interface",mono:true,text:u=>[...u.ifaces].join(",")||"—"},
+      {key:"device",label:"Device",text:u=>[...u.devices].join(",")||"—"},
+      {key:"status",label:"Status",html:u=>[...u.statuses].map(s=>this.pill(s,this.statusCls(s))).join(" ")||"—",text:u=>[...u.statuses].join(", ")},
+      {key:"source",label:"Source",html:u=>[...u.sources].map(s=>this.pill(s,"p-blue")).join(" "),text:u=>[...u.sources].join(", ")},
+      {key:"age",label:"Age",text:u=>u.detail.age||"—"}
+    ];
+    this.table("used","used",cols,rows,{onRowClick:u=>this.showUsedDetail(u),emptyTitle:"ไม่พบ IP ที่ใช้งาน",emptyMsg:"ต้องมี ARP หรือ DHCP Binding เพื่อระบุ IP ที่ใช้งาน"});
+  },
+  statusCls(s){ return {Active:"p-green","DHCP Lease":"p-cyan","DHCP Reservation":"p-purple","Static (DHCP Manual)":"p-purple",Static:"p-purple",Gateway:"p-blue",SVI:"p-blue","Virtual IP":"p-purple","Stale ARP":"p-yellow","Incomplete ARP":"p-yellow","Recently Seen":"p-green"}[s]||"p-gray"; },
+
+  /* ---------- Likely Free ---------- */
+  tab_free(){
+    const a=this.ds.analysis;
+    const rows=a.free.filter(f=>this.netFilter(f.ip));
+    const cols=[
+      {key:"ip",label:"IP Address",mono:true},
+      {key:"network",label:"Network",mono:true},
+      {key:"level",label:"Confidence",html:f=>this.pill(f.level+" ("+f.score+")",f.cls),text:f=>f.level,sortVal:f=>f.score},
+      {key:"checked",label:"Evidence Checked",text:f=>f.checks.filter(c=>c.ok).length+"/"+f.checks.length},
+      {key:"missing",label:"Missing Data",text:f=>f.missing.join(", ")||"—"},
+      {key:"verify",label:"Recommended Verification",text:f=>"ping "+f.ip+" / show ip arp | i "+f.ip}
+    ];
+    // consecutive-free tool header
+    const pane=document.getElementById("pane-free");
+    this.table("free","free",cols,rows,{onRowClick:f=>this.showFreeDetail(f),
+      filters:[{key:"level",label:"Confidence"}],emptyTitle:"ไม่มี Likely Free IP",
+      emptyMsg:"อาจไม่พบ Network หรือทุก IP ถูกใช้/จองแล้ว"});
+    // prepend consecutive finder
+    const tool=document.createElement("div"); tool.className="card"; tool.style.margin="0 0 14px";
+    tool.innerHTML=`<h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Find Consecutive Free IPs</h2>
+      <div class="selector-row">
+        <label>จำนวน</label><input id="ccCount" type="number" min="1" value="5" style="max-width:90px">
+        <label>Start</label><input id="ccStart" placeholder="10.36.2.100" style="max-width:150px">
+        <label>End</label><input id="ccEnd" placeholder="10.36.2.200" style="max-width:150px">
+        <label>Min Confidence</label><select id="ccMin"><option value="50">Verify First (50)</option><option value="70">Medium (70)</option><option value="85">High (85)</option></select>
+        <button class="btn sm primary" id="ccGo">ค้นหา</button>
+      </div><div id="ccResult"></div>`;
+    pane.insertBefore(tool,pane.firstChild);
+    document.getElementById("ccGo").addEventListener("click",()=>this.findConsecutive());
+  },
+  findConsecutive(){
+    const a=this.ds.analysis; const cnt=+document.getElementById("ccCount").value;
+    const start=document.getElementById("ccStart").value.trim(), end=document.getElementById("ccEnd").value.trim();
+    const min=+document.getElementById("ccMin").value; const res=document.getElementById("ccResult");
+    if(!cnt||cnt<1){ res.innerHTML=`<p style="color:var(--red)">จำนวนไม่ถูกต้อง</p>`; return; }
+    if(start&&!IPv4Utils.isValidIPv4(start)||end&&!IPv4Utils.isValidIPv4(end)){ res.innerHTML=`<p style="color:var(--red)">รูปแบบ IP ไม่ถูกต้อง</p>`; return; }
+    if(start&&end&&IPv4Utils.compareIp(start,end)>0){ res.innerHTML=`<p style="color:var(--red)">Start ต้องไม่มากกว่า End</p>`; return; }
+    let pool=a.free.filter(f=>f.score>=min).map(f=>f.ip).sort((x,y)=>IPv4Utils.compareIp(x,y));
+    if(start) pool=pool.filter(ip=>IPv4Utils.compareIp(ip,start)>=0);
+    if(end) pool=pool.filter(ip=>IPv4Utils.compareIp(ip,end)<=0);
+    // find run of consecutive uint32
+    let best=null;
+    for(let i=0;i<pool.length;i++){ let run=[pool[i]];
+      for(let j=i+1;j<pool.length;j++){ if(IPv4Utils.ipToUint32(pool[j])===IPv4Utils.ipToUint32(pool[j-1])+1) run.push(pool[j]); else break; }
+      if(run.length>=cnt){ best=run.slice(0,cnt); break; } }
+    if(!best){ res.innerHTML=`<p style="color:var(--yellow)">ไม่พบช่วง IP ต่อเนื่อง ${cnt} ตัว ที่ Confidence ≥ ${min}%</p>`; return; }
+    const avg=Math.round(best.reduce((s,ip)=>s+(a.free.find(f=>f.ip===ip).score),0)/best.length);
+    res.innerHTML=`<div class="sec-card" style="margin-top:8px"><h4>Recommended Range</h4>
+      <div class="det mono" style="font-size:14px;color:var(--cyan)">${escapeHtml(best[0])} – ${escapeHtml(best[best.length-1])}</div>
+      <div class="det">Count: <span>${best.length}</span> · Confidence: <span>${avg}%</span></div>
+      <div class="det" style="margin-top:6px">Excluded from: ARP, DHCP Binding, Snooping Binding, Static Binding, Interface IP, Excluded Address</div>
+      <button class="btn sm" id="ccCopy" style="margin-top:8px">Copy Range</button></div>`;
+    document.getElementById("ccCopy").addEventListener("click",async()=>{ const ok=await copyToClipboard(best.join("\n")); showToast(ok?"คัดลอกแล้ว":"ล้มเหลว",ok?"ok":"err"); });
+  },
+
+  /* ---------- Reserved ---------- */
+  tab_reserved(){
+    const a=this.ds.analysis;
+    const rows=[...a.reserved.values()].filter(r=>{ const ip=r.range?r.range[0]:r.ip; return this.netFilter(ip); });
+    const cols=[
+      {key:"ip",label:"IP / Range",mono:true},
+      {key:"type",label:"Type",html:r=>[...r.types].map(t=>this.pill(t,this.resCls(t))).join(" "),text:r=>[...r.types].join(", ")},
+      {key:"vlan",label:"VLAN",text:r=>safe(r.vlan)},
+      {key:"network",label:"Network",mono:true,text:r=>safe(r.network)},
+      {key:"source",label:"Source",text:r=>safe(r.source)}
+    ];
+    this.table("reserved","reserved",cols,rows,{onRowClick:r=>this.showEvidenceDrawer(r.ip,r.evidence,"Reserved"),
+      filters:[{key:"type",label:"Type",val:r=>[...r.types][0]}],emptyTitle:"ไม่มี Reserved IP",emptyMsg:"Network/Broadcast/Gateway/Excluded จะแสดงที่นี่"});
+  },
+  resCls(t){ return {Network:"p-gray",Broadcast:"p-gray",Gateway:"p-blue",Interface:"p-blue",Excluded:"p-purple",Static:"p-purple","Virtual IP":"p-purple",Management:"p-cyan","User Reserved":"p-yellow"}[t]||"p-gray"; },
+
+  /* ---------- Unknown ---------- */
+  tab_unknown(){
+    const a=this.ds.analysis;
+    const rows=a.unknown.filter(u=>this.netFilter(u.ip));
+    const cols=[
+      {key:"ip",label:"IP",mono:true},
+      {key:"reason",label:"Reason"},
+      {key:"missing",label:"Missing Evidence",text:u=>u.missing||"—"},
+      {key:"suggested",label:"Suggested Command",mono:true,text:u=>u.suggested||"—"},
+      {key:"risk",label:"Risk",html:u=>this.pill(u.risk||"—",u.risk==="High"?"p-red":u.risk==="Medium"?"p-yellow":"p-gray"),text:u=>u.risk}
+    ];
+    this.table("unknown","unknown",cols,rows,{onRowClick:u=>this.showEvidenceDrawer(u.ip,u.evidence,"Unknown / Verify"),
+      emptyTitle:"ไม่มีรายการที่ต้องตรวจสอบ",emptyMsg:"IP ที่สรุปไม่ได้จะแสดงที่นี่"});
+  },
+
+  /* ---------- DHCP Pools ---------- */
+  tab_pools(){
+    const a=this.ds.analysis; const rows=a.pools;
+    const cols=[
+      {key:"name",label:"Pool Name"},
+      {key:"network",label:"Network/CIDR",mono:true},
+      {key:"vlan",label:"VLAN",text:p=>safe(p.vlan)},
+      {key:"gateway",label:"Gateway",mono:true,text:p=>safe(p.gateway)},
+      {key:"total",label:"Total",text:p=>safe(p.total)},
+      {key:"leased",label:"Leased",text:p=>safe(p.leased)},
+      {key:"available",label:"Available",text:p=>safe(p.available)},
+      {key:"usage",label:"Usage",html:p=>p.usage!=null?this.pill(p.usage+"%",p.cls):"—",text:p=>p.usage!=null?p.usage+"%":"—",sortVal:p=>p.usage||0},
+      {key:"status",label:"Status",html:p=>this.pill(p.status,p.cls),text:p=>p.status}
+    ];
+    this.table("pools","pools",cols,rows,{onRowClick:p=>this.showPoolDetail(p),emptyTitle:"ไม่พบ DHCP Pool",emptyMsg:"วาง show ip dhcp pool หรือ running-config section dhcp"});
+  },
+  showPoolDetail(p){
+    const rows=[["Pool Name",p.name],["Network",p.network],["Mask",p.mask],["Gateway",p.gateway],
+      ["DNS",(p.dns||[]).join(", ")],["Lease",p.lease],["Total",p.total],["Leased",p.leased],
+      ["Excluded",p.excludedCount],["Available",p.available],["Usage",p.usage!=null?p.usage+"%":null],["Status",p.status]];
+    const warn=[]; if(p.noGateway)warn.push("Pool ไม่มี default-router"); if(p.noDns)warn.push("Pool ไม่มี DNS server");
+    this.openDrawer(`<h3>DHCP Pool: ${escapeHtml(p.name)}</h3>
+      <div class="kv">${rows.map(([k,v])=>`<div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(safe(v))}</div>`).join("")}</div>
+      ${warn.length?`<div class="disclaimer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 3.9a2 2 0 00-3.4 0z"/></svg><span>${warn.map(escapeHtml).join("<br>")}</span></div>`:""}
+      ${this.evidenceHtml(p.evidence)}`);
+  },
+
+  /* ---------- Security ---------- */
+  tab_security(){
+    const a=this.ds.analysis; const s=this.ds.security; const pane=document.getElementById("pane-security");
+    const scoreExplain=`คะแนน = ผลรวมน้ำหนักของฟีเจอร์ที่ Enabled หารด้วยน้ำหนักรวมของฟีเจอร์ที่ตรวจพบว่ารองรับ (${a.security.scoreRaw}/${a.security.scoreMax})`;
+    const cards=a.security.rows.map(r=>`<div class="sec-card"><h4>${escapeHtml(r.feature)} ${this.pill(r.status,r.cls)}</h4>
+      <div class="det">VLAN/Interface: <span>${escapeHtml(r.vlanIf)}</span><br>${escapeHtml(r.details)}<br>Risk: ${this.pill(r.risk,r.risk==="High"?"p-red":r.risk==="Low"?"p-green":"p-gray")}</div></div>`).join("");
+    pane.innerHTML=`
+      <div class="score-ring"><div class="ring" style="--p:${a.security.score}"><b>${a.security.score}%</b></div>
+        <div><div style="font-size:15px;font-weight:600">Security Score</div><div class="det" style="color:var(--muted);font-size:12px">${escapeHtml(scoreExplain)}</div>
+        <div class="det" style="color:var(--muted);font-size:11.5px;margin-top:6px">หมายเหตุ: ฟีเจอร์ที่ไม่มี Output จะแสดง “Not Detected” ไม่สรุปว่า Disabled</div></div></div>
+      <div class="sec-grid">${cards}</div>`;
+    this.setCount("security",a.security.rows.filter(r=>r.status==="Protected").length);
+  },
+
+  /* ---------- Blocked / Denied ---------- */
+  tab_blocked(){
+    const a=this.ds.analysis; const rows=a.blocked;
+    const cols=[
+      {key:"ip",label:"IP",mono:true,text:b=>safe(b.ip)},
+      {key:"mac",label:"MAC",mono:true,text:b=>safe(b.mac)},
+      {key:"port",label:"Port",mono:true,text:b=>safe(b.port)},
+      {key:"vlan",label:"VLAN",text:b=>safe(b.vlan)},
+      {key:"status",label:"Status",html:b=>this.pill(b.status,this.blkCls(b.status)),text:b=>b.status},
+      {key:"reason",label:"Reason"},
+      {key:"feature",label:"Security Feature",html:b=>this.pill(b.feature,"p-blue"),text:b=>b.feature},
+      {key:"device",label:"Device",text:b=>safe(b.device)}
+    ];
+    this.table("blocked","blocked",cols,rows,{onRowClick:b=>this.showEvidenceDrawer(b.ip||b.mac||b.port,b.evidence,"Blocked / Denied — "+b.status),
+      filters:[{key:"feature",label:"Feature"},{key:"device",label:"Device"},{key:"status",label:"Status"}],
+      emptyTitle:"ไม่พบ Blocked / Denied",emptyMsg:"ไม่พบ violation, deny, err-disabled หรือ conflict"});
+  },
+  blkCls(s){ return {Blocked:"p-red",Denied:"p-red",Dropped:"p-red",Quarantine:"p-purple",Unauthorized:"p-yellow","Err-disabled":"p-red",Conflict:"p-yellow",Restricted:"p-yellow",Protected:"p-cyan"}[s]||"p-gray"; },
+
+  /* ---------- Conflict & Anomaly ---------- */
+  tab_conflict(){
+    const a=this.ds.analysis;
+    const reviewed=LS.get("reviewed",{});
+    const rows=a.conflicts.map((c,i)=>({...c,_id:c.type+"|"+(c.ip||c.mac||c.iface||i),_rev:reviewed[c.type+"|"+(c.ip||c.mac||c.iface||i)]}));
+    const cols=[
+      {key:"severity",label:"Severity",html:c=>this.sevPill(c.severity),text:c=>c.severity,sortVal:c=>({Critical:0,High:1,Warning:2,Info:3}[c.severity]??9)},
+      {key:"type",label:"Type"},
+      {key:"ip",label:"IP",mono:true,text:c=>safe(c.ip)},
+      {key:"mac",label:"MAC",mono:true,text:c=>safe(c.mac)},
+      {key:"vlan",label:"VLAN",text:c=>safe(c.vlan)},
+      {key:"iface",label:"Interface",mono:true,text:c=>safe(c.iface)},
+      {key:"desc",label:"Description"},
+      {key:"cause",label:"Possible Cause"},
+      {key:"rev",label:"Reviewed",html:c=>c._rev?this.pill("Reviewed","p-green"):this.pill("Open","p-gray"),text:c=>c._rev?"Reviewed":"Open"}
+    ];
+    this.table("conflict","conflict",cols,rows,{onRowClick:c=>this.showConflictDetail(c),
+      filters:[{key:"severity",label:"Severity"},{key:"type",label:"Type"}],
+      emptyTitle:"ไม่พบ Conflict หรือ Anomaly",emptyMsg:"ยอดเยี่ยม — ไม่พบเหตุการณ์ผิดปกติจากข้อมูลที่วิเคราะห์"});
+    // export incident report button
+    const pane=document.getElementById("pane-conflict");
+    if(rows.length){ const bar=pane.querySelector(".toolbar");
+      const b=document.createElement("button"); b.className="btn sm"; b.textContent="Export Incident Report";
+      b.addEventListener("click",()=>ExportManager.htmlReport(this.ds)); bar.appendChild(b); }
+  },
+  showConflictDetail(c){
+    const id=c._id;
+    this.openDrawer(`<h3>${escapeHtml(c.type)} ${this.sevPill(c.severity)}</h3>
+      <div class="kv">
+        <div class="k">IP</div><div class="v">${escapeHtml(safe(c.ip))}</div>
+        <div class="k">MAC</div><div class="v">${escapeHtml(safe(c.mac))}</div>
+        <div class="k">VLAN</div><div class="v">${escapeHtml(safe(c.vlan))}</div>
+        <div class="k">Interface</div><div class="v">${escapeHtml(safe(c.iface))}</div>
+        <div class="k">Device</div><div class="v">${escapeHtml(safe(c.device))}</div>
+        <div class="k">Description</div><div class="v">${escapeHtml(c.desc)}</div>
+        <div class="k">Possible Cause</div><div class="v">${escapeHtml(c.cause)}</div>
+        ${c.suggested?`<div class="k">Suggested</div><div class="v">${escapeHtml(c.suggested)}</div>`:""}
+      </div>
+      <div class="input-actions">
+        <button class="btn sm" id="cfReview">Mark Reviewed</button>
+        <button class="btn sm" id="cfInvest">Copy Investigation Commands</button>
+      </div>
+      ${this.evidenceHtml(c.evidence)}`);
+    document.getElementById("cfReview").addEventListener("click",()=>{ const r=LS.get("reviewed",{}); r[id]=true; LS.set("reviewed",r); showToast("ทำเครื่องหมาย Reviewed","ok"); this.tab_conflict(); this.closeAll(); });
+    document.getElementById("cfInvest").addEventListener("click",async()=>{
+      const cmds=[]; if(c.ip)cmds.push("show ip arp | include "+c.ip);
+      if(c.mac)cmds.push("show mac address-table address "+MacUtils.toCisco(c.mac));
+      if(c.iface)cmds.push("show interfaces "+c.iface,"show port-security interface "+c.iface);
+      cmds.push("show logging | include "+(c.mac?MacUtils.toCisco(c.mac):c.ip||""));
+      const ok=await copyToClipboard(cmds.join("\n")); showToast(ok?"คัดลอกคำสั่งแล้ว":"ล้มเหลว",ok?"ok":"err"); });
+  },
+
+  /* ---------- MAC to Port ---------- */
+  tab_mac2port(){
+    const ds=this.ds;
+    // build joined rows keyed by mac
+    const macIndex=new Map();
+    const touch=m=>{ if(!macIndex.has(m))macIndex.set(m,{mac:m,ips:new Set(),vlans:new Set(),ports:new Set(),devices:new Set(),status:null,neighbor:null,evidence:[]}); return macIndex.get(m); };
+    ds.macTable.forEach(r=>{ if(!r.mac)return; const o=touch(r.mac); if(r.port)o.ports.add(r.device+"/"+r.port); if(r.vlan!=null)o.vlans.add(r.vlan); o.devices.add(r.device); o.evidence.push(...r.evidence); });
+    ds.arp.forEach(r=>{ if(r.mac){ const o=touch(r.mac); if(r.ip)o.ips.add(r.ip); if(r.vlan!=null)o.vlans.add(r.vlan); o.evidence.push(...r.evidence); } });
+    ds.intStatus.forEach(s=>{});
+    const statusByPort={}; ds.intStatus.forEach(s=>statusByPort[s.port]=s.status);
+    const neighByPort={}; ds.neighbors.forEach(n=>{ if(n.localPort)neighByPort[n.localPort.replace(/^GigabitEthernet/,"Gi")]=n.neighbor; });
+    const rows=[...macIndex.values()].filter(o=>{ const ip=[...o.ips][0]; return this.netFilter(ip)||o.ips.size===0; }).map(o=>{
+      const port=[...o.ports][0]||null; const pShort=port?port.split("/").slice(1).join("/"):null;
+      const behind=o.ports.size>1; const st=port?statusByPort[pShort]||null:null;
+      return {mac:o.mac,ip:[...o.ips][0]||null,ips:[...o.ips],vlan:[...o.vlans].join(",")||null,device:[...o.devices].join(",")||null,
+        port:pShort,status:st,neighbor:pShort?neighByPort[pShort]||null:null,behind,evidence:o.evidence,
+        confidence:o.ports.size===1&&o.ips.size>=1?"High":o.ports.size===1?"Medium":"Verify"}; });
+    const cols=[
+      {key:"ip",label:"IP",mono:true,text:r=>safe(r.ip)},
+      {key:"mac",label:"MAC",mono:true},
+      {key:"vlan",label:"VLAN",text:r=>safe(r.vlan)},
+      {key:"device",label:"Device",text:r=>safe(r.device)},
+      {key:"port",label:"Port",mono:true,html:r=>escapeHtml(safe(r.port))+(r.behind?" "+this.pill("Behind Uplink","p-yellow"):"")},
+      {key:"status",label:"Port Status",html:r=>r.status?this.pill(r.status,r.status==="connected"?"p-green":"p-gray"):"—",text:r=>r.status},
+      {key:"neighbor",label:"Neighbor",text:r=>safe(r.neighbor)},
+      {key:"confidence",label:"Confidence",html:r=>this.pill(r.confidence,r.confidence==="High"?"p-green":r.confidence==="Medium"?"p-cyan":"p-yellow"),text:r=>r.confidence}
+    ];
+    this.table("mac2port","mac2port",cols,rows,{onRowClick:r=>this.showMac2PortDetail(r),emptyTitle:"ไม่มีข้อมูล MAC to Port",emptyMsg:"วาง show mac address-table และ show ip arp"});
+  },
+  showMac2PortDetail(r){
+    const flow=[r.ip,r.mac,r.vlan!=null?"VLAN "+r.vlan:null,r.device,r.port,r.status].filter(Boolean);
+    this.openDrawer(`<h3>MAC to Port</h3>
+      <div class="flow">${flow.map((n,i)=>`<div class="node">${escapeHtml(String(n))}</div>${i<flow.length-1?'<div class="ar">↓</div>':""}`).join("")}</div>
+      ${r.behind?`<div class="disclaimer" style="margin-top:12px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 3.9a2 2 0 00-3.4 0z"/></svg><span>MAC พบบนหลาย port — อาจอยู่หลัง Uplink ควรตรวจ Switch ถัดไป</span></div>`:""}
+      ${this.evidenceHtml(r.evidence)}`);
+  },
+
+  /* ---------- Snapshot Compare ---------- */
+  tab_snapshot(){
+    const pane=document.getElementById("pane-snapshot");
+    const cmp=SnapshotManager.compare();
+    const a=SnapshotManager.load("A"), b=SnapshotManager.load("B");
+    let head=`<div class="input-actions" style="margin-bottom:14px">
+      <button class="btn sm" id="snapA">Save current → A</button>
+      <button class="btn sm" id="snapB">Save current → B</button>
+      <button class="btn sm" id="snapSwap">Swap</button>
+      <button class="btn sm" id="snapClear">Clear</button>
+      ${cmp?'<button class="btn sm" id="snapExport">Export Comparison</button>':""}
+      <span style="color:var(--muted);font-size:12px">A: ${a?escapeHtml(new Date(a.time).toLocaleString()):"—"} · B: ${b?escapeHtml(new Date(b.time).toLocaleString()):"—"}</span>
+    </div>`;
+    if(!cmp){ pane.innerHTML=head+this.emptyState("ยังไม่มี Snapshot ให้เปรียบเทียบ","บันทึก Snapshot A และ B แล้วระบบจะเทียบให้"); }
+    else if(!cmp.rows.length){ pane.innerHTML=head+this.emptyState("ไม่มีความเปลี่ยนแปลง","Snapshot A และ B เหมือนกัน"); }
+    else{
+      const body=cmp.rows.map(r=>`<tr><td>${escapeHtml(r.change)}</td><td class="mono">${escapeHtml(r.before)}</td><td class="mono">${escapeHtml(r.after)}</td><td>${this.sevPill(r.severity)}</td></tr>`).join("");
+      pane.innerHTML=head+`<div class="tablewrap"><table><thead><tr><th>Change Type</th><th>Before</th><th>After</th><th>Severity</th></tr></thead><tbody>${body}</tbody></table></div>`;
+      this.setCount("snapshot",cmp.rows.length);
+    }
+    document.getElementById("snapA").addEventListener("click",()=>{SnapshotManager.save("A",this.ds);this.tab_snapshot();});
+    document.getElementById("snapB").addEventListener("click",()=>{SnapshotManager.save("B",this.ds);this.tab_snapshot();});
+    document.getElementById("snapSwap").addEventListener("click",()=>{SnapshotManager.swap();this.tab_snapshot();});
+    document.getElementById("snapClear").addEventListener("click",()=>{SnapshotManager.clear("A");SnapshotManager.clear("B");this.tab_snapshot();});
+    const ex=document.getElementById("snapExport"); if(ex)ex.addEventListener("click",()=>ExportManager.json(cmp,"snapshot-comparison.json"));
+  },
+
+  /* ---------- Commands ---------- */
+  tab_commands(){
+    const ds=this.ds; const pane=document.getElementById("pane-commands");
+    const detected=Object.entries(ds.commands);
+    const rows=detected.map(([cmd,st])=>`<tr><td class="mono">${escapeHtml(cmd)}</td><td>${this.pill(st,this.cmdCls(st))}</td></tr>`).join("");
+    const known=CommandDetector.KNOWN.map(k=>k[0]);
+    const notDetected=known.filter(k=>!ds.commands[k]).slice(0,40);
+    pane.innerHTML=`
+      <h4 style="margin:4px 0 8px">Detected Commands (${detected.length})</h4>
+      ${detected.length?`<div class="tablewrap"><table><thead><tr><th>Command</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`:this.emptyState("ไม่พบคำสั่ง","ไม่พบ show command ที่รองรับ")}
+      <h4 style="margin:18px 0 8px">Not Detected</h4>
+      <div class="cmdlist" style="font-size:11.5px;color:var(--muted)">${notDetected.map(escapeHtml).join("<br>")||"—"}</div>
+      ${ds.warnings.length?`<h4 style="margin:18px 0 8px">Parsing Warnings (${ds.warnings.length})</h4><div class="cmdlist" style="font-size:11.5px">${ds.warnings.map(w=>escapeHtml(w.msg)).join("<br>")}</div>`:""}`;
+    this.setCount("commands",detected.length);
+  },
+  cmdCls(s){ return {"Parsed Successfully":"p-green","Parsed with Warning":"p-yellow","Detected":"p-cyan","Unsupported Format":"p-red","Not Detected":"p-gray"}[s]||"p-gray"; },
+
+  /* ---------- Raw Evidence ---------- */
+  tab_evidence(){
+    const ds=this.ds; const pane=document.getElementById("pane-evidence");
+    const rows=ds.blocks.filter(b=>b.command).map((b,i)=>`<tr class="clickable" data-idx="${i}"><td>${escapeHtml(b.device)}</td><td class="mono">${escapeHtml(b.command)}</td><td class="mono">${b.startLine}</td><td>${b.lines.length} บรรทัด</td><td>${this.pill(ds.commands[b.command]||"Detected",this.cmdCls(ds.commands[b.command]))}</td></tr>`).join("");
+    pane.innerHTML=rows?`<p style="color:var(--muted);font-size:12.5px">คลิกที่ Command Block เพื่อดู Source Output ทั้งหมด</p>
+      <div class="tablewrap"><table><thead><tr><th>Device</th><th>Command</th><th>Start Line</th><th>Lines</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`:this.emptyState("ไม่มี Evidence","วางผลลัพธ์แล้ววิเคราะห์");
+    const blocks=ds.blocks.filter(b=>b.command);
+    pane.querySelectorAll("tbody tr").forEach(tr=>tr.addEventListener("click",()=>this.showBlockEvidence(blocks[+tr.dataset.idx])));
+    this.setCount("evidence",blocks.length);
+  },
+  showBlockEvidence(b){
+    const lines=[{n:b.startLine,text:b.device+"#"+b.rawCommand},...b.lines];
+    this.openDrawer(`<h3>Raw Evidence</h3>
+      <div class="kv"><div class="k">Device</div><div class="v">${escapeHtml(b.device)}</div>
+      <div class="k">Command</div><div class="v">${escapeHtml(b.rawCommand)}</div>
+      <div class="k">Detected as</div><div class="v">${escapeHtml(b.command||"Unsupported")}</div></div>
+      <div class="evline"><pre>${lines.map(l=>escapeHtml((l.n+"").padStart(4)+"  "+l.text)).join("\n")}</pre></div>`);
+  },
+
+  /* ---------- drawers & evidence ---------- */
+  evidenceHtml(evidence){
+    if(!evidence||!evidence.length) return `<h4 style="margin-top:16px;color:var(--cyan)">Evidence</h4><p style="color:var(--muted);font-size:12px">ไม่มีหลักฐานบรรทัดที่เชื่อมโยง</p>`;
+    // dedupe
+    const seen=new Set(); const uniq=evidence.filter(e=>{ const k=e.device+"|"+e.command+"|"+e.line; if(seen.has(k))return false; seen.add(k); return true; });
+    return `<h4 style="margin-top:16px;color:var(--cyan)">Evidence (${uniq.length})</h4>`+uniq.map((e,i)=>`
+      <div class="evline"><div class="meta">Evidence ${i+1} · Device: <b>${escapeHtml(safe(e.device))}</b> · Command: <b>${escapeHtml(safe(e.command))}</b> · Line: <b>${escapeHtml(safe(e.line))}</b></div>
+      <pre><span class="hl">${escapeHtml(e.text)}</span></pre>
+      <div class="meta" style="margin-top:6px">Parser Rule: ${escapeHtml(safe(e.rule))}</div></div>`).join("");
+  },
+  showEvidenceDrawer(title,evidence,label){
+    this.openDrawer(`<h3>${escapeHtml(label||"รายละเอียด")}</h3><div class="kv"><div class="k">รายการ</div><div class="v">${escapeHtml(safe(title))}</div></div>${this.evidenceHtml(evidence)}`);
+  },
+  showUsedDetail(u){
+    const kv=[["IP",u.ip],["MAC",[...u.macs].join(", ")],["VLAN",[...u.vlans].join(", ")],["Port",[...u.ifaces].join(", ")],
+      ["Device",[...u.devices].join(", ")],["Status",[...u.statuses].join(", ")],["Source",[...u.sources].join(", ")],
+      ["DHCP Client ID",u.detail.clientId],["Lease",u.detail.lease],["ARP Age",u.detail.age]];
+    this.openDrawer(`<h3>Used IP: ${escapeHtml(u.ip)}</h3>
+      <div class="kv">${kv.map(([k,v])=>`<div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(safe(v))}</div>`).join("")}</div>
+      <div class="input-actions"><button class="btn sm" id="udCopy">Copy IP</button><button class="btn sm" id="udPing">Copy Ping</button></div>
+      ${this.evidenceHtml(u.evidence)}`);
+    document.getElementById("udCopy").addEventListener("click",async()=>{const ok=await copyToClipboard(u.ip);showToast(ok?"คัดลอกแล้ว":"ล้มเหลว",ok?"ok":"err");});
+    document.getElementById("udPing").addEventListener("click",async()=>{const ok=await copyToClipboard("ping "+u.ip);showToast(ok?"คัดลอกแล้ว":"ล้มเหลว",ok?"ok":"err");});
+  },
+  showFreeDetail(f){
+    const checks=f.checks.map(c=>`<div class="selftest"><div class="row"><span>${escapeHtml(c.label)}</span><span class="mono ${c.ok?"pass":"fail"}">${c.ok?"+"+c.pts:"0"}</span></div></div>`).join("");
+    this.openDrawer(`<h3>Likely Free: ${escapeHtml(f.ip)}</h3>
+      <div class="kv"><div class="k">Network</div><div class="v">${escapeHtml(f.network)}</div>
+      <div class="k">Confidence</div><div class="v">${escapeHtml(f.level)} (${f.score})</div>
+      <div class="k">Missing Data</div><div class="v">${escapeHtml(f.missing.join(", ")||"—")}</div></div>
+      <h4 style="color:var(--cyan)">Confidence Breakdown</h4>${checks}
+      ${f.missing.length?`<div class="disclaimer" style="margin-top:12px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 3.9a2 2 0 00-3.4 0z"/></svg><span>Insufficient Evidence — ควรเก็บเพิ่ม: ${escapeHtml(f.missing.map(m=>m==="ARP Table"?"show ip arp":"show ip dhcp binding").join(", "))}</span></div>`:""}
+      <div class="input-actions">
+        <button class="btn sm" id="fCopy">Copy IP</button>
+        <button class="btn sm" id="fPing">Copy Ping</button>
+        <button class="btn sm" id="fArp">Copy ARP Check</button>
+        <button class="btn sm" id="fReserve">Mark Reserved</button>
+      </div>`);
+    document.getElementById("fCopy").addEventListener("click",async()=>{const ok=await copyToClipboard(f.ip);showToast(ok?"คัดลอกแล้ว":"ล้มเหลว",ok?"ok":"err");});
+    document.getElementById("fPing").addEventListener("click",async()=>{const ok=await copyToClipboard("ping "+f.ip);showToast(ok?"คัดลอกแล้ว":"ล้มเหลว",ok?"ok":"err");});
+    document.getElementById("fArp").addEventListener("click",async()=>{const ok=await copyToClipboard("show ip arp | include "+f.ip);showToast(ok?"คัดลอกแล้ว":"ล้มเหลว",ok?"ok":"err");});
+    document.getElementById("fReserve").addEventListener("click",()=>{ const r=LS.get("userReserved",[]); if(!r.includes(f.ip))r.push(f.ip); LS.set("userReserved",r); showToast("ทำเครื่องหมาย Reserved (localStorage)","ok"); this.closeAll(); });
+  },
+
+  openDrawer(html){ const d=document.getElementById("drawerBody"); d.innerHTML=html;
+    document.getElementById("drawer").classList.add("show"); document.getElementById("overlay").classList.add("show"); },
+  openModal(html){ document.getElementById("modalBody").innerHTML=html;
+    document.getElementById("modal").classList.add("show"); document.getElementById("overlay").classList.add("show"); },
+  closeAll(){ document.getElementById("drawer").classList.remove("show"); document.getElementById("modal").classList.remove("show"); document.getElementById("overlay").classList.remove("show"); },
+
+  /* ---------- modals ---------- */
+  showCommandsModal(){
+    const cats={
+      "IP และ DHCP":["show ip interface brief","show ip arp","show ip dhcp binding","show ip dhcp pool","show ip dhcp conflict","show running-config | section dhcp","show running-config | include ^ip dhcp excluded-address","show running-config | include ^arp","show running-config | include ^ip source binding"],
+      "MAC และ Port":["show mac address-table","show interfaces status","show interfaces counters errors","show interfaces switchport","show cdp neighbors detail","show lldp neighbors detail"],
+      "Security":["show ip dhcp snooping","show ip dhcp snooping binding","show ip dhcp snooping statistics","show ip arp inspection","show ip arp inspection statistics","show ip verify source","show port-security","show port-security address","show interfaces status err-disabled","show access-lists","show authentication sessions","show logging"]
+    };
+    let html=`<h2>Recommended Commands</h2><p style="color:var(--muted);font-size:12.5px">เลือกคำสั่งที่ต้องการแล้วคัดลอกไปรันบนอุปกรณ์</p>`;
+    Object.entries(cats).forEach(([cat,cmds])=>{ html+=`<div class="cmdcat"><h4>${escapeHtml(cat)} <button class="btn sm" data-cat="${escapeHtml(cat)}">Copy Category</button></h4>
+      <div class="cmdlist">${cmds.map(c=>`<label><input type="checkbox" checked value="${escapeHtml(c)}">${escapeHtml(c)}</label>`).join("")}</div></div>`; });
+    html+=`<div class="input-actions"><button class="btn primary sm" id="copyAllCmd">Copy Selected</button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)">Vendor <select id="vendorSel" style="width:auto"><option>Cisco IOS / IOS-XE</option><option>Cisco NX-OS (บางคำสั่งต่างกัน)</option></select></label></div>`;
+    this.openModal(html);
+    document.querySelectorAll("[data-cat]").forEach(b=>b.addEventListener("click",async e=>{ e.stopPropagation();
+      const ok=await copyToClipboard(cats[b.dataset.cat].join("\n")); showToast(ok?"คัดลอกหมวดแล้ว":"ล้มเหลว",ok?"ok":"err"); }));
+    document.getElementById("copyAllCmd").addEventListener("click",async()=>{ const sel=[...document.querySelectorAll("#modalBody input:checked")].map(i=>i.value);
+      const ok=await copyToClipboard(sel.join("\n")); showToast(ok?"คัดลอก "+sel.length+" คำสั่งแล้ว":"ล้มเหลว",ok?"ok":"err"); });
+  },
+  showHelpModal(){
+    this.openModal(`<h2>วิธีใช้งาน</h2><div class="helpbody">
+      <h4>1. วาง Output</h4><p>คัดลอกผลลัพธ์ show command จาก Router / Switch มาวางในช่อง แล้วกด Analyze — รองรับหลายอุปกรณ์และหลายคำสั่งในครั้งเดียว (ตรวจจับจาก prompt เช่น <span class="mono">CORE-SW01#</span>)</p>
+      <h4>2. ผลการวิเคราะห์</h4><p>แท็บต่าง ๆ แยก Used / Likely Free / Reserved / Unknown, DHCP Pools, Security, Blocked, Conflict & Anomaly, MAC to Port ทุกรายการคลิกดู Evidence ต้นทางได้</p>
+      <h4>3. ความมั่นใจ (Confidence)</h4><p>Free IP ใช้คะแนนโปร่งใส ไม่มีการรับประกัน 100% หากไม่มี ARP/DHCP เพียงพอจะจำกัดคะแนนและแจ้ง Insufficient Evidence</p>
+      <h4>4. ความเป็นส่วนตัว</h4><p>การวิเคราะห์ทั้งหมดทำงานในเบราว์เซอร์ ไม่มีการส่งข้อมูลออกนอกเครื่อง เครื่องมือนี้อ่านจากข้อความที่วางเท่านั้น ไม่สามารถ Ping หรือเชื่อมต่ออุปกรณ์โดยตรง</p>
+      <h4>ข้อจำกัด</h4><p>Parser รองรับรูปแบบ Cisco IOS / IOS-XE เป็นหลัก รูปแบบที่ต่างจากตัวอย่างอาจถูกทำเครื่องหมาย Parsed with Warning หรือ Unsupported Format การ Enumerate IP จำกัดที่ /19 ต่อ network เพื่อไม่ให้เบราว์เซอร์ค้าง</p>
+      <h4>Self-Test</h4><p>เปิด Developer Console เพื่อดูผล Self-Test หรือกดปุ่มด้านล่าง</p>
+      <button class="btn sm" id="runST">Run Self-Test</button><div id="stOut" class="selftest" style="margin-top:10px"></div>
+      </div>`);
+    document.getElementById("runST").addEventListener("click",()=>{ const r=SelfTest.run();
+      document.getElementById("stOut").innerHTML=`<div class="row"><span>Total</span><span class="mono">${r.total}</span></div>
+        <div class="row"><span>Passed</span><span class="mono pass">${r.passed}</span></div>
+        <div class="row"><span>Failed</span><span class="mono ${r.failed?"fail":"pass"}">${r.failed}</span></div>`+
+        r.results.map(x=>`<div class="row"><span class="mono">${escapeHtml(x.name)}</span><span class="${x.ok?"pass":"fail"}">${x.ok?"PASS":"FAIL"}</span></div>`).join(""); });
+  },
+  showSnapshotSaveModal(){
+    if(!this.ds){ showToast("ยังไม่มีผลวิเคราะห์","warn"); return; }
+    this.openModal(`<h2>Save Snapshot</h2><p style="color:var(--muted);font-size:12.5px">บันทึกผลปัจจุบันเพื่อเปรียบเทียบภายหลัง (เก็บใน localStorage)</p>
+      <div class="input-actions"><button class="btn primary sm" id="msA">บันทึกเป็น Snapshot A</button><button class="btn primary sm" id="msB">บันทึกเป็น Snapshot B</button>
+      <button class="btn sm" id="msCompare">ไปหน้า Compare</button></div>`);
+    document.getElementById("msA").addEventListener("click",()=>{SnapshotManager.save("A",this.ds);this.closeAll();});
+    document.getElementById("msB").addEventListener("click",()=>{SnapshotManager.save("B",this.ds);this.closeAll();});
+    document.getElementById("msCompare").addEventListener("click",()=>{this.closeAll();this.showTab("snapshot");});
+  },
+
+  /* ---------- theme & misc ---------- */
+  toggleTheme(){ const cur=document.documentElement.getAttribute("data-theme"); const next=cur==="dark"?"light":"dark";
+    document.documentElement.setAttribute("data-theme",next); LS.set("theme",next); this.updateThemeIcon(next);
+    if(this.ds&&this.state.activeTab==="overview")this.tab_overview(); },
+  updateThemeIcon(theme){ const i=document.getElementById("themeIcon");
+    i.innerHTML=theme==="dark"?'<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>':'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>'; },
+  refreshSnapshotInfo(){ /* placeholder for header snapshot indicators */ }
+};
+
+/* =====================================================================
+   SelfTest — validates parsers/utils; visible in Help > Run Self-Test
+   ===================================================================== */
+const SelfTest = {
+  run(){
+    const results=[]; const t=(name,cond)=>results.push({name,ok:!!cond});
+    // MAC normalize
+    t("normalizeMac dot",MacUtils.normalizeMac("6c3b.e524.91f8")==="6c:3b:e5:24:91:f8");
+    t("normalizeMac colon",MacUtils.normalizeMac("6c:3b:e5:24:91:f8")==="6c:3b:e5:24:91:f8");
+    t("normalizeMac dash",MacUtils.normalizeMac("6c-3b-e5-24-91-f8")==="6c:3b:e5:24:91:f8");
+    t("clientId->mac",MacUtils.clientIdToMac("0100.6c3b.e524.91f8")==="6c:3b:e5:24:91:f8");
+    t("invalid MAC null",MacUtils.normalizeMac("zzzz")===null);
+    // IP utils
+    t("isValidIPv4 ok",IPv4Utils.isValidIPv4("10.36.2.1"));
+    t("isValidIPv4 bad",!IPv4Utils.isValidIPv4("300.1.1.1"));
+    t("ip<->uint",IPv4Utils.uint32ToIp(IPv4Utils.ipToUint32("10.36.2.134"))==="10.36.2.134");
+    t("prefixToMask /24",IPv4Utils.uint32ToIp(IPv4Utils.prefixToMask(24))==="255.255.255.0");
+    t("maskToPrefix",IPv4Utils.maskToPrefix("255.255.255.0")===24);
+    t("noncontiguous mask null",IPv4Utils.maskToPrefix("255.0.255.0")===null);
+    // subnet /24 /30 /31 /32
+    const s24=IPv4Utils.calculateSubnet("10.36.2.10",24);
+    t("/24 usable 254",s24.usable===254&&s24.broadcast==="10.36.2.255");
+    const s30=IPv4Utils.calculateSubnet("10.0.0.1",30); t("/30 usable 2",s30.usable===2);
+    const s31=IPv4Utils.calculateSubnet("10.0.0.0",31); t("/31 usable 2",s31.usable===2);
+    const s32=IPv4Utils.calculateSubnet("10.0.0.5",32); t("/32 usable 1",s32.usable===1);
+    t("isIpInSubnet",IPv4Utils.isIpInSubnet("10.36.2.55","10.36.2.0",24)&&!IPv4Utils.isIpInSubnet("10.36.3.1","10.36.2.0",24));
+    // parse ARP
+    const dsA=newDataset(); Parsers.arp({device:"SW",command:"show ip arp",startLine:1,
+      lines:[{n:2,text:"Internet 10.36.2.50 2 6c3b.e524.91f8 ARPA Vlan2"}]},dsA);
+    t("parse ARP row",dsA.arp.length===1&&dsA.arp[0].ip==="10.36.2.50"&&dsA.arp[0].mac==="6c:3b:e5:24:91:f8"&&dsA.arp[0].vlan===2);
+    // parse DHCP binding
+    const dsB=newDataset(); Parsers.dhcpBinding({device:"SW",command:"show ip dhcp binding",startLine:1,
+      lines:[{n:2,text:"10.36.2.50      0100.6c3b.e524.91f8             Automatic"}]},dsB);
+    t("parse DHCP binding",dsB.dhcpBindings.length===1&&dsB.dhcpBindings[0].mac==="6c:3b:e5:24:91:f8");
+    // parse pool + excluded
+    const dsP=newDataset(); Parsers.runningConfig({device:"SW",command:"show running-config",startLine:1,lines:
+      [{n:1,text:"ip dhcp excluded-address 10.36.2.1 10.36.2.20"},{n:2,text:"ip dhcp pool P"},{n:3,text:" network 10.36.2.0 255.255.255.0"},{n:4,text:" default-router 10.36.2.1"}]},dsP);
+    t("parse excluded",dsP.excluded.length===1&&dsP.excluded[0].end==="10.36.2.20");
+    t("parse pool",dsP.dhcpPools.length===1&&dsP.dhcpPools[0].network==="10.36.2.0"&&dsP.dhcpPools[0].prefix===24);
+    // parse MAC table
+    const dsM=newDataset(); Parsers.macTable({device:"SW",command:"show mac address-table",startLine:1,
+      lines:[{n:2,text:"   2    6c3b.e524.91f8    DYNAMIC     Gi1/0/12"}]},dsM);
+    t("parse MAC table",dsM.macTable.length===1&&dsM.macTable[0].port==="Gi1/0/12"&&dsM.macTable[0].vlan===2);
+    // duplicate IP detection
+    const dup=analyzeText("SW#show ip arp\nInternet 10.0.0.5 1 aaaa.bbbb.cccc ARPA Vlan2\nInternet 10.0.0.5 1 1111.2222.3333 ARPA Vlan2\n");
+    t("detect duplicate IP",dup.analysis.conflicts.some(c=>c.type==="IP มีหลาย MAC"));
+    // gateway-in-dhcp detection
+    const gw=analyzeText("R#show running-config | section dhcp\nip dhcp pool P\n network 10.0.0.0 255.255.255.0\n default-router 10.0.0.1\nR#show ip dhcp binding\n10.0.0.1 0100.aaaa.bbbb.cccc Automatic\n");
+    t("detect gateway in DHCP",gw.analysis.conflicts.some(c=>c.type==="Gateway ถูกแจกโดย DHCP"));
+    // network/broadcast usage
+    const nb=analyzeText("R#show ip interface brief\nVlan2 10.0.0.1 YES manual up up\nR#show running-config\ninterface Vlan2\n ip address 10.0.0.1 255.255.255.0\nR#show ip arp\nInternet 10.0.0.255 1 aaaa.bbbb.cccc ARPA Vlan2\n");
+    t("detect broadcast usage",nb.analysis.conflicts.some(c=>/Broadcast Address ถูกใช้/.test(c.type)));
+    // static in dynamic range
+    const st=analyzeText("R#show running-config | section dhcp\nip dhcp pool P\n network 10.0.0.0 255.255.255.0\n default-router 10.0.0.1\nR#show running-config | include ^ip source binding\nip source binding aaaa.bbbb.cccc vlan 2 10.0.0.150 interface Gi1/0/1\n");
+    t("detect static in dynamic",st.analysis.conflicts.some(c=>c.type==="Static IP ใน Dynamic Range"));
+    // MAC flap from log
+    const fl=analyzeText("SW#show logging\n%SW_MATM-4-MACFLAP_NOTIF: Host 6c3b.e524.91f8 in vlan 2 is flapping between port Gi1/0/12 and port Gi1/0/20\n");
+    t("detect MAC flap log",fl.analysis.conflicts.some(c=>c.type==="MAC Flapping (Log)"));
+    // free confidence bounded when no arp/dhcp
+    const noev=analyzeText("R#show running-config\ninterface Vlan9\n ip address 10.9.9.1 255.255.255.0\n");
+    t("free confidence bounded",noev.analysis.free.every(f=>f.score<=45));
+    // client-identifier -> MAC (7-byte and 8-byte forms seen on IOS-XE)
+    t("clientId 14hex",MacUtils.clientIdToMac("01e8.039a.b263.e3")==="e8:03:9a:b2:63:e3");
+    t("clientId 16hex",MacUtils.clientIdToMac("0110.604b.7099.a1")==="10:60:4b:70:99:a1");
+    // headerless running-config (no "show" prompt) still parses
+    const rc=analyzeText("ip dhcp pool 10.215.1.37\n host 10.215.1.37 255.255.255.0\n client-identifier 01e8.039a.b263.e3\n default-router 10.215.1.224\nSPT-SW#");
+    t("headerless config parsed",rc.dhcpPools.length===1 && rc.analysis.used.has("10.215.1.37"));
+    // host reservation surfaces as Used
+    t("reservation is Used",rc.analysis.used.get("10.215.1.37").macs.has("e8:03:9a:b2:63:e3"));
+    // DHCP binding with State/Interface columns
+    const bx=analyzeText("SW#show ip dhcp binding\n10.215.155.1    012c.e38e.7168.a4   Jul 05 2026 08:16 AM   Automatic  Active  Vlan155\n");
+    t("binding state+iface",bx.dhcpBindings.length===1 && bx.dhcpBindings[0].state==="Active" && bx.dhcpBindings[0].vlan===155);
+    // default-router outside reservation subnet
+    const dr=analyzeText("ip dhcp pool 10.215.11.101\n host 10.215.11.101 255.255.255.0\n client-identifier 0178.8c77.fed5.3c\n default-router 10.215.1.224\nSW#");
+    t("gw-out-of-subnet reservation",dr.analysis.conflicts.some(c=>c.type==="Default-router นอก Subnet ของ Reservation"));
+    // secondary IP builds an extra network
+    const sec=analyzeText("SW#show running-config\ninterface Vlan2\n ip address 10.215.11.224 255.255.255.0 secondary\n ip address 10.215.1.224 255.255.255.0\n");
+    t("secondary IP network",sec.networks.some(n=>n.cidr==="10.215.11.0/24") && sec.networks.some(n=>n.cidr==="10.215.1.0/24"));
+    // XSS escape
+    t("escapeHtml",escapeHtml('<img src=x onerror="alert(1)">')==="&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+    t("safe() no undefined",safe(undefined)==="—"&&safe(NaN)==="—"&&safe(null)==="—");
+    const passed=results.filter(r=>r.ok).length;
+    return {results,total:results.length,passed,failed:results.length-passed};
+  }
+};
+
+/* BOOT */
+document.addEventListener("DOMContentLoaded",()=>UIController.boot());
+</script>
+</body>
+</html>
