@@ -1,3 +1,4 @@
+# Temporary workflow used to connect the detailed IP/MAC panel, then removed.
 name: Add IP and MAC check details
 
 on:
