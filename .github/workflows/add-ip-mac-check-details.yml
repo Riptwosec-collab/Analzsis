@@ -1,0 +1,94 @@
+name: Add IP and MAC check details
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Connect detailed IP and MAC checks
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/components/netscope-app.tsx')
+          text = path.read_text(encoding='utf-8')
+
+          import_line = 'import { IpMacCheckDetails } from "@/components/ip-mac-check-details";\n'
+          anchor = 'import { Textarea } from "@/components/ui/textarea";\n'
+          if import_line not in text:
+              if anchor not in text:
+                  raise SystemExit('Textarea import anchor was not found')
+              text = text.replace(anchor, anchor + import_line, 1)
+
+          ip_start = text.find('function IpTable(')
+          ip_end = text.find('\nfunction Devices(', ip_start)
+          if ip_start < 0 or ip_end < 0:
+              raise SystemExit('IpTable block was not found')
+
+          block = text[ip_start:ip_end]
+          old = '''        {selected ? (
+          <DetailBlock
+            title={`${detailLabel(t)}: ${selected.ip}`}
+            lines={[
+              `${t.table.status}: ${translateIpStatus(selected.status, t)}`,
+              `${t.table.confidence}: ${selected.confidence}%`,
+              `${t.table.mac}: ${selected.macs.join(", ") || "-"}`,
+              `${t.table.vlan}: ${selected.vlans.join(", ") || "-"}`,
+              `${t.table.ports}: ${selected.ports.join(", ") || "-"}`,
+              `${t.table.sources}: ${selected.sources.join(", ") || "-"}`,
+              "",
+              ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
+            ]}
+          />
+        ) : null}'''
+          new = '''        {selected ? (
+          <>
+            <DetailBlock
+              title={`${detailLabel(t)}: ${selected.ip}`}
+              lines={[
+                `${t.table.status}: ${translateIpStatus(selected.status, t)}`,
+                `${t.table.confidence}: ${selected.confidence}%`,
+                `${t.table.mac}: ${selected.macs.join(", ") || "-"}`,
+                `${t.table.vlan}: ${selected.vlans.join(", ") || "-"}`,
+                `${t.table.ports}: ${selected.ports.join(", ") || "-"}`,
+                `${t.table.sources}: ${selected.sources.join(", ") || "-"}`,
+                "",
+                ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
+              ]}
+            />
+            <IpMacCheckDetails row={selected} language={isThaiCopy(t) ? "th" : "en"} />
+          </>
+        ) : null}'''
+
+          if '<IpMacCheckDetails row={selected}' not in block:
+              if old not in block:
+                  raise SystemExit('Expected IpTable detail block was not found')
+              block = block.replace(old, new, 1)
+              text = text[:ip_start] + block + text[ip_end:]
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit changes
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/netscope-app.tsx
+          git commit -m "feat(ui): add detailed checks to IP and MAC records"
+          git push
