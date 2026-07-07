@@ -173,6 +173,20 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
   );
   const duplicateFinding = relatedFindings.some(finding => /duplicate|หลาย mac|หลาย ip|flap|multiple/i.test(`${finding.title} ${finding.description}`));
   const blockedFinding = relatedFindings.some(finding => /block|deny|err.?disabled|violation|quarantine|rejection/i.test(`${finding.title} ${finding.description}`)) || relatedLogs.length > 0;
+  const mismatchDetails = arpMatches.flatMap(arp => {
+    if (!arp.mac) return [];
+    const rows = result.macTable.filter(mac => mac.mac === arp.mac);
+    return rows
+      .filter(mac => (arp.vlan !== undefined && mac.vlan !== undefined && arp.vlan !== mac.vlan) || (arp.interfaceName && mac.port !== arp.interfaceName))
+      .map(mac => ({
+        mac: arp.mac!,
+        ip: arp.ip,
+        arpVlan: arp.vlan,
+        macVlan: mac.vlan,
+        arpPort: arp.interfaceName,
+        macPort: mac.port
+      }));
+  });
 
   const checks: CheckItem[] = [
     commandCheck(
@@ -293,7 +307,8 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
       relatedFindings,
       relatedLogs,
       macDetails,
-      networkPools
+      networkPools,
+      mismatchDetails
     }),
     subnets: subnets.map(item => item.cidr),
     arpSummary: arpMatches.length ? `${arpMatches.length} record(s)` : "-",
@@ -315,7 +330,8 @@ function buildProblemLines({
   relatedFindings,
   relatedLogs,
   macDetails,
-  networkPools
+  networkPools,
+  mismatchDetails
 }: {
   row: IpInventoryRecord;
   language: "en" | "th";
@@ -327,6 +343,7 @@ function buildProblemLines({
   relatedLogs: AnalysisResult["logs"];
   macDetails: Array<{ mac: string; ports: string[]; arpIps: string[]; dhcpIps: string[]; findingTitles: string[]; hasWarning: boolean }>;
   networkPools: AnalysisResult["dhcpPools"];
+  mismatchDetails: Array<{ mac: string; ip: string; arpVlan?: number; macVlan?: number; arpPort?: string; macPort: string }>;
 }) {
   const lines: string[] = [];
   if (row.status === "Unknown" && row.sources.includes("DHCP Pool range")) {
@@ -359,6 +376,11 @@ function buildProblemLines({
     lines.push(language === "th"
       ? "ARP กับ MAC table ชี้ VLAN/Port ไม่ตรงกัน ต้องตรวจ uplink, trunk, port-channel หรือ endpoint move"
       : "ARP and MAC-table evidence disagree on VLAN/port. Check uplinks, trunks, port-channels, or endpoint movement.");
+  }
+  for (const mismatch of mismatchDetails) {
+    lines.push(language === "th"
+      ? `MAC ${mismatch.mac} ของ IP ${mismatch.ip} ไม่ตรงกัน: ARP VLAN ${mismatch.arpVlan ?? "-"} Port ${mismatch.arpPort ?? "-"} แต่ MAC Table VLAN ${mismatch.macVlan ?? "-"} Port ${mismatch.macPort}`
+      : `MAC ${mismatch.mac} for IP ${mismatch.ip} is inconsistent: ARP VLAN ${mismatch.arpVlan ?? "-"} port ${mismatch.arpPort ?? "-"}, MAC table VLAN ${mismatch.macVlan ?? "-"} port ${mismatch.macPort}.`);
   }
   for (const mac of macDetails.filter(item => item.hasWarning)) {
     lines.push(language === "th"

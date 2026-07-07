@@ -32,6 +32,9 @@ import { exportExcel, exportJson, exportMarkdown, exportPdf } from "@/services/e
 import { sanitizeCli, scanSensitiveData } from "@/services/sanitization/sanitizer";
 import { useAnalysisStore } from "@/store/analysis-store";
 import type { AnalysisResult, Finding, IpInventoryRecord, SecurityCheck, Severity } from "@/types/network";
+import { AuditModal } from "@/components/audit-modal";
+import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
+import { SubnetCheckDetails } from "@/components/subnet-check-details";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -749,6 +752,7 @@ function MetricDrilldown({ focus, result, t, language }: { focus: MetricFocus; r
 
 function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
   const [selectedCidr, setSelectedCidr] = useState(result.subnets[0]?.cidr ?? "");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const selected = result.subnets.find(subnet => subnet.cidr === selectedCidr) ?? result.subnets[0];
   return (
     <Card>
@@ -761,7 +765,10 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
           {result.subnets.map(subnet => (
             <TableRow
               key={subnet.cidr}
-              onClick={() => setSelectedCidr(subnet.cidr)}
+              onClick={() => {
+                setSelectedCidr(subnet.cidr);
+                setDetailsOpen(true);
+              }}
               className={cn("cursor-pointer", selected?.cidr === subnet.cidr && "bg-cyan-400/10")}
             >
               <TableCell className="font-mono">{subnet.cidr}</TableCell>
@@ -776,17 +783,25 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
           ))}
         </DataTable>
         {selected ? (
-          <DetailBlock
-            title={`${detailLabel(t)}: ${selected.cidr}`}
-            lines={[
-              `Network: ${selected.network}/${selected.prefix}`,
-              `Range: ${selected.firstHost} - ${selected.lastHost}`,
-              `${t.metrics.usable}: ${selected.totalUsable}`,
-              `${t.metrics.used}: ${selected.used}`,
-              `${t.metrics.free}: ${selected.free}`,
-              `${t.metrics.score}: ${selected.utilization}%`
-            ]}
-          />
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
+            <div className="font-mono text-cyan-100">{selected.cidr}</div>
+            <div>{t.metrics.used}: {selected.used}</div>
+            <div>{t.metrics.free}: {selected.free}</div>
+            <div>{t.metrics.score}: {selected.utilization}%</div>
+            <Button type="button" size="sm" onClick={() => setDetailsOpen(true)}>
+              Open selected subnet audit
+            </Button>
+          </div>
+        ) : null}
+        {selected ? (
+          <AuditModal
+            open={detailsOpen}
+            onClose={() => setDetailsOpen(false)}
+            title={`Subnet audit: ${selected.cidr}`}
+            subtitle={`Used ${selected.used} · Likely free ${selected.free} · Utilization ${selected.utilization}%`}
+          >
+            <SubnetCheckDetails subnet={selected} language={isThaiCopy(t) ? "th" : "en"} />
+          </AuditModal>
         ) : null}
       </CardContent>
     </Card>
@@ -854,6 +869,7 @@ function IpTable({
   t: Copy;
 }) {
   const [selectedIp, setSelectedIp] = useState(rows[0]?.ip ?? "");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const selected = rows.find(row => row.ip === selectedIp) ?? rows[0];
   return (
     <Card>
@@ -869,10 +885,13 @@ function IpTable({
           className="mb-3 h-10 w-full rounded-lg border px-3 text-sm"
         />
         <DataTable headers={[t.table.ip, t.table.status, t.table.confidence, t.table.mac, t.table.vlan, t.table.ports, t.table.sources]}>
-          {rows.slice(0, 500).map(row => (
+          {rows.map(row => (
             <TableRow
               key={row.ip}
-              onClick={() => setSelectedIp(row.ip)}
+              onClick={() => {
+                setSelectedIp(row.ip);
+                setDetailsOpen(true);
+              }}
               className={cn("cursor-pointer", selected?.ip === row.ip && "bg-cyan-400/10")}
             >
               <TableCell className="font-mono">{row.ip}</TableCell>
@@ -886,23 +905,25 @@ function IpTable({
           ))}
         </DataTable>
         {selected ? (
-          <DetailBlock
-            title={`${detailLabel(t)}: ${selected.ip}`}
-            lines={[
-              `${t.table.status}: ${translateIpStatus(selected.status, t)}`,
-              `${t.table.confidence}: ${selected.confidence}%`,
-              `${t.table.mac}: ${selected.macs.join(", ") || "-"}`,
-              `${t.table.vlan}: ${selected.vlans.join(", ") || "-"}`,
-              `${t.table.ports}: ${selected.ports.join(", ") || "-"}`,
-              `${t.table.sources}: ${selected.sources.join(", ") || "-"}`,
-              `${ipDetailTerm("reason", t)}: ${translateIpStatusReason(selected, t)}`,
-              `${ipDetailTerm("checked", t)}: ${selected.checkedSources?.join(", ") || "-"}`,
-              `${ipDetailTerm("missing", t)}: ${selected.missingSources?.join(", ") || "-"}`,
-              `${ipDetailTerm("pools", t)}: ${selected.relatedPoolNames?.join(", ") || "-"}`,
-              "",
-              ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
-            ]}
-          />
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
+            <div className="font-mono text-cyan-100">{selected.ip}</div>
+            <div>{t.table.status}: {translateIpStatus(selected.status, t)}</div>
+            <div>{t.table.mac}: <span className="font-mono">{selected.macs.join(", ") || "-"}</span></div>
+            <div>{t.table.sources}: {selected.sources.join(", ") || "-"}</div>
+            <Button type="button" size="sm" onClick={() => setDetailsOpen(true)}>
+              Open selected IP / MAC detail
+            </Button>
+          </div>
+        ) : null}
+        {selected ? (
+          <AuditModal
+            open={detailsOpen}
+            onClose={() => setDetailsOpen(false)}
+            title={`IP / MAC detail: ${selected.ip}`}
+            subtitle={`${selected.status} · ${selected.macs.join(", ") || "No MAC"} · ${selected.sources.join(", ") || "No source"}`}
+          >
+            <IpMacCheckDetails row={selected} language={isThaiCopy(t) ? "th" : "en"} />
+          </AuditModal>
         ) : null}
       </CardContent>
     </Card>
@@ -1363,35 +1384,6 @@ function translateIpStatus(status: IpInventoryRecord["status"], t: Copy) {
     Reserved: "สงวนไว้",
     Unknown: "ไม่ทราบ"
   }[status];
-}
-
-function translateIpStatusReason(row: IpInventoryRecord, t: Copy) {
-  if (!isThaiCopy(t)) return row.statusReason ?? "-";
-  if (row.status === "Used" && row.sources.includes("ARP")) return "พบ ARP entry ที่ผูก IP กับ MAC จึงถือว่าใช้งานอยู่";
-  if (row.status === "Used" && row.sources.includes("DHCP Binding")) return "พบ DHCP binding หรือ source-binding ของ IP นี้ จึงถือว่าใช้งานอยู่";
-  if (row.status === "Reserved" && row.sources.includes("DHCP Reservation")) return "พบ DHCP reservation หรือ host pool ที่จอง IP นี้ไว้";
-  if (row.status === "Reserved" && row.sources.includes("Interface IP")) return "IP นี้ถูกใช้เป็น IP ของ Interface, SVI หรือ routed interface";
-  if (row.status === "Unknown" && row.sources.includes("DHCP Pool range")) return "IP อยู่ใน dynamic DHCP pool จึงห้ามสรุปว่าว่างจนกว่าจะมี lease, ARP หรือ MAC evidence เพิ่ม";
-  if (row.status === "Unknown" && row.sources.includes("Insufficient evidence for free-IP decision")) return "ยังขาดหลักฐาน ARP, DHCP binding, MAC table หรือ subnet evidence จึงยังไม่ยืนยันว่า IP ว่าง";
-  if (row.status === "Likely Free") return "ตรวจหลักฐานที่จำเป็นแล้วไม่พบ ARP, DHCP binding, MAC-table, reservation, interface หรือ dynamic-pool evidence ของ IP นี้";
-  return row.statusReason ?? "-";
-}
-
-function ipDetailTerm(term: "reason" | "checked" | "missing" | "pools", t: Copy) {
-  if (!isThaiCopy(t)) {
-    return {
-      reason: "Reason",
-      checked: "Checked",
-      missing: "Missing",
-      pools: "Related DHCP pools"
-    }[term];
-  }
-  return {
-    reason: "เหตุผลการจัดประเภท",
-    checked: "หลักฐานที่ตรวจแล้ว",
-    missing: "หลักฐานที่ยังขาด",
-    pools: "DHCP Pool ที่เกี่ยวข้อง"
-  }[term];
 }
 
 function translateCheckStatus(status: SecurityCheck["status"], t: Copy) {

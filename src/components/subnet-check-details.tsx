@@ -115,6 +115,36 @@ export function SubnetCheckDetails({ subnet, language }: SubnetCheckDetailsProps
         <Summary label="Finding / Event" value={model.findings.length + model.logs.length} />
       </div>
 
+      <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/5 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-medium">
+            {language === "th" ? "IP ที่น่าจะว่างใน Subnet นี้" : "Likely free IP candidates in this subnet"}
+          </div>
+          <Badge severity={model.freeCandidates.length ? "Low" : "Info"}>
+            {model.freeCandidates.length}
+          </Badge>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          {language === "th"
+            ? "ระบบจะแสดงเฉพาะ IP ที่ผ่านเงื่อนไขหลักฐานครบและไม่อยู่ใน DHCP dynamic pool เท่านั้น ถ้า IP อยู่ใน pool จะไม่ถือว่าว่าง แม้ยังไม่เห็น lease ในข้อมูลที่นำเข้า"
+            : "Only addresses with complete evidence and outside dynamic DHCP pools are listed. Addresses inside a DHCP pool are not treated as free even when no lease is present in the imported data."}
+        </p>
+        {model.freeCandidates.length ? (
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {model.freeCandidates.slice(0, 32).map(row => (
+              <div key={row.ip} className="rounded-md border border-emerald-400/15 bg-black/20 p-2 text-xs">
+                <div className="font-mono text-emerald-100">{row.ip}</div>
+                <div className="mt-1 text-muted-foreground">{row.statusReason ?? row.sources.join(", ")}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-muted-foreground">
+            {language === "th" ? "ไม่พบ IP ที่น่าจะว่างจากหลักฐานรอบนี้" : "No likely free IP candidate was produced from this evidence set."}
+          </p>
+        )}
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {model.checks.map(check => (
           <article key={check.id} className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
@@ -346,7 +376,9 @@ function buildSubnetModel(subnet: SubnetRecord, result: AnalysisResult, language
     ...result.commandBlocks.flatMap(block => block.lines.filter(line => lineContainsSubnetIp(line.text, subnet)))
   ].map(formatEvidence)).slice(0, 500);
 
-  return { inventory, arp, bindings, relatedMacs, interfaces, findings, logs, checks, commandStatuses, unknownCommands, evidenceLines };
+  const freeCandidates = inventory.filter(row => row.status === "Likely Free");
+
+  return { inventory, freeCandidates, arp, bindings, relatedMacs, interfaces, findings, logs, checks, commandStatuses, unknownCommands, evidenceLines };
 }
 
 function check(id: string, title: string, state: CheckState, summary: string, details: string[], sources: string[], evidence: Evidence[]): CheckItem {
