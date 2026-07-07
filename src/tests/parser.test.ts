@@ -223,13 +223,10 @@ describe("analysis", () => {
     expect(result.telegramSummary).toContain("Network Analysis Summary");
   });
 
-  it("does not classify addresses inside a DHCP dynamic pool as likely free without lease evidence", () => {
+  it("does not enumerate addresses inside a DHCP dynamic pool as unknown or likely free without lease evidence", () => {
     const result = analyzeCli(SAMPLE_DATA);
     const poolCandidate = result.ipInventory.find(item => item.ip === "10.10.10.30");
-    expect(poolCandidate?.status).toBe("Unknown");
-    expect(poolCandidate?.sources).toContain("DHCP Pool range");
-    expect(poolCandidate?.statusReason).toContain("dynamic DHCP pool");
-    expect(poolCandidate?.relatedPoolNames).toContain("VLAN10");
+    expect(poolCandidate).toBeUndefined();
     expect(result.freeIps.some(item => item.ip === "10.10.10.30")).toBe(false);
   });
 
@@ -243,16 +240,29 @@ describe("analysis", () => {
     expect(result.freeIps.some(item => item.ip === "10.10.2.51")).toBe(false);
   });
 
-  it("does not call subnet gaps free when ARP DHCP and MAC evidence is incomplete", () => {
+  it("does not enumerate subnet gaps when ARP DHCP and MAC evidence is incomplete", () => {
     const result = analyzeCli([
       "CORE-SW01#show running-config",
       "interface Vlan30",
       " ip address 10.30.30.1 255.255.255.0"
     ].join("\n"));
     const candidate = result.ipInventory.find(item => item.ip === "10.30.30.10");
-    expect(candidate?.status).toBe("Unknown");
-    expect(candidate?.sources).toContain("Insufficient evidence for free-IP decision");
-    expect(candidate?.missingSources).toEqual(expect.arrayContaining(["ARP", "DHCP Binding", "MAC Table"]));
+    expect(candidate).toBeUndefined();
+    expect(result.freeIps).toHaveLength(0);
+  });
+
+  it("keeps evidence-backed unresolved log IPs as unknown", () => {
+    const result = analyzeCli([
+      "CORE-SW01#show running-config",
+      "interface Vlan40",
+      " ip address 10.40.40.1 255.255.255.0",
+      "CORE-SW01#show logging",
+      "%SW_DAI-4-DHCP_SNOOPING_DENY: 1 Invalid ARPs on Gi1/0/14, vlan 40.([aaaa.bbbb.cccc/10.40.40.25/0000.0000.0000/10.40.40.1/12:02:03 UTC])"
+    ].join("\n"));
+    const logIp = result.ipInventory.find(item => item.ip === "10.40.40.25");
+    expect(logIp?.status).toBe("Unknown");
+    expect(logIp?.sources).toContain("Log/Security Event");
+    expect(logIp?.missingSources).toEqual(expect.arrayContaining(["ARP", "DHCP Binding", "MAC Table"]));
     expect(result.freeIps).toHaveLength(0);
   });
 

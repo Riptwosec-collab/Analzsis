@@ -137,6 +137,21 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
     });
   };
 
+  for (const log of dataset.logs) {
+    if (!log.ip) continue;
+    touch(log.ip, {
+      status: "Unknown",
+      statusReason: "Security or log evidence mentions this IP, but no ARP, DHCP binding, MAC-table, reservation, or interface ownership evidence resolved it.",
+      confidence: 45,
+      vlans: log.vlan ? [log.vlan] : [],
+      ports: log.interfaceName ? [log.interfaceName] : [],
+      sources: ["Log/Security Event"],
+      checkedSources,
+      missingSources,
+      evidence: log.evidence
+    });
+  }
+
   for (const record of dataset.arp) {
     touch(record.ip, {
       status: record.mac ? "Used" : "Unknown",
@@ -199,31 +214,8 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       const ip = numberToIp(value);
       if (!map.has(ip) && !arpIps.has(ip)) {
         const pool = findDynamicPoolForIp(dataset, ip);
-        if (pool) {
-          touch(ip, {
-            status: "Unknown",
-            statusReason: "IP is inside a dynamic DHCP pool; without lease, ARP, or MAC evidence it cannot be called free.",
-            confidence: 55,
-            sources: ["DHCP Pool range"],
-            checkedSources,
-            missingSources,
-            relatedPoolNames: [pool.name],
-            evidence: pool.evidence
-          });
-          continue;
-        }
-        if (!hasEnoughEvidenceToCallFree(dataset, commandSet, subnet)) {
-          touch(ip, {
-            status: "Unknown",
-            statusReason: "Free-IP decision is blocked because required ARP, DHCP binding, MAC table, or subnet evidence is incomplete.",
-            confidence: 30,
-            sources: ["Insufficient evidence for free-IP decision"],
-            checkedSources,
-            missingSources,
-            evidence: []
-          });
-          continue;
-        }
+        if (pool) continue;
+        if (!hasEnoughEvidenceToCallFree(dataset, commandSet, subnet)) continue;
         touch(ip, {
           status: "Likely Free",
           statusReason: "No ARP, DHCP binding, MAC-table, reservation, interface, or dynamic-pool evidence was found after required checks.",
