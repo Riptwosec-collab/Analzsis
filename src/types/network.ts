@@ -280,11 +280,15 @@ export interface Finding extends DescriptionMetadata {
 export interface IpInventoryRecord extends DescriptionMetadata {
   ip: string;
   status: "Used" | "Likely Free" | "Reserved" | "Unknown";
+  statusReason?: string;
   confidence: number;
   macs: string[];
   vlans: number[];
   ports: string[];
   sources: string[];
+  checkedSources?: string[];
+  missingSources?: string[];
+  relatedPoolNames?: string[];
   evidence: Evidence[];
 }
 

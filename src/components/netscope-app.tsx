@@ -895,6 +895,10 @@ function IpTable({
               `${t.table.vlan}: ${selected.vlans.join(", ") || "-"}`,
               `${t.table.ports}: ${selected.ports.join(", ") || "-"}`,
               `${t.table.sources}: ${selected.sources.join(", ") || "-"}`,
+              `${ipDetailTerm("reason", t)}: ${translateIpStatusReason(selected, t)}`,
+              `${ipDetailTerm("checked", t)}: ${selected.checkedSources?.join(", ") || "-"}`,
+              `${ipDetailTerm("missing", t)}: ${selected.missingSources?.join(", ") || "-"}`,
+              `${ipDetailTerm("pools", t)}: ${selected.relatedPoolNames?.join(", ") || "-"}`,
               "",
               ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
             ]}
@@ -1265,7 +1269,18 @@ function FilePicker({ label, onText }: { label: string; onText: (text: string) =
 function filterInventory(rows: IpInventoryRecord[], query: string) {
   if (!query.trim()) return rows;
   const q = query.toLowerCase();
-  return rows.filter(row => [row.ip, row.status, ...row.macs, ...row.ports, ...row.sources, ...row.vlans.map(String)].join(" ").toLowerCase().includes(q));
+  return rows.filter(row => [
+    row.ip,
+    row.status,
+    row.statusReason ?? "",
+    ...row.macs,
+    ...row.ports,
+    ...row.sources,
+    ...(row.checkedSources ?? []),
+    ...(row.missingSources ?? []),
+    ...(row.relatedPoolNames ?? []),
+    ...row.vlans.map(String)
+  ].join(" ").toLowerCase().includes(q));
 }
 
 async function runAnalysis(text: string): Promise<AnalysisResult> {
@@ -1348,6 +1363,35 @@ function translateIpStatus(status: IpInventoryRecord["status"], t: Copy) {
     Reserved: "สงวนไว้",
     Unknown: "ไม่ทราบ"
   }[status];
+}
+
+function translateIpStatusReason(row: IpInventoryRecord, t: Copy) {
+  if (!isThaiCopy(t)) return row.statusReason ?? "-";
+  if (row.status === "Used" && row.sources.includes("ARP")) return "พบ ARP entry ที่ผูก IP กับ MAC จึงถือว่าใช้งานอยู่";
+  if (row.status === "Used" && row.sources.includes("DHCP Binding")) return "พบ DHCP binding หรือ source-binding ของ IP นี้ จึงถือว่าใช้งานอยู่";
+  if (row.status === "Reserved" && row.sources.includes("DHCP Reservation")) return "พบ DHCP reservation หรือ host pool ที่จอง IP นี้ไว้";
+  if (row.status === "Reserved" && row.sources.includes("Interface IP")) return "IP นี้ถูกใช้เป็น IP ของ Interface, SVI หรือ routed interface";
+  if (row.status === "Unknown" && row.sources.includes("DHCP Pool range")) return "IP อยู่ใน dynamic DHCP pool จึงห้ามสรุปว่าว่างจนกว่าจะมี lease, ARP หรือ MAC evidence เพิ่ม";
+  if (row.status === "Unknown" && row.sources.includes("Insufficient evidence for free-IP decision")) return "ยังขาดหลักฐาน ARP, DHCP binding, MAC table หรือ subnet evidence จึงยังไม่ยืนยันว่า IP ว่าง";
+  if (row.status === "Likely Free") return "ตรวจหลักฐานที่จำเป็นแล้วไม่พบ ARP, DHCP binding, MAC-table, reservation, interface หรือ dynamic-pool evidence ของ IP นี้";
+  return row.statusReason ?? "-";
+}
+
+function ipDetailTerm(term: "reason" | "checked" | "missing" | "pools", t: Copy) {
+  if (!isThaiCopy(t)) {
+    return {
+      reason: "Reason",
+      checked: "Checked",
+      missing: "Missing",
+      pools: "Related DHCP pools"
+    }[term];
+  }
+  return {
+    reason: "เหตุผลการจัดประเภท",
+    checked: "หลักฐานที่ตรวจแล้ว",
+    missing: "หลักฐานที่ยังขาด",
+    pools: "DHCP Pool ที่เกี่ยวข้อง"
+  }[term];
 }
 
 function translateCheckStatus(status: SecurityCheck["status"], t: Copy) {

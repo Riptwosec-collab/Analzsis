@@ -228,6 +228,8 @@ describe("analysis", () => {
     const poolCandidate = result.ipInventory.find(item => item.ip === "10.10.10.30");
     expect(poolCandidate?.status).toBe("Unknown");
     expect(poolCandidate?.sources).toContain("DHCP Pool range");
+    expect(poolCandidate?.statusReason).toContain("dynamic DHCP pool");
+    expect(poolCandidate?.relatedPoolNames).toContain("VLAN10");
     expect(result.freeIps.some(item => item.ip === "10.10.10.30")).toBe(false);
   });
 
@@ -236,6 +238,8 @@ describe("analysis", () => {
     const reservation = result.ipInventory.find(item => item.ip === "10.10.2.51");
     expect(reservation?.status).toBe("Reserved");
     expect(reservation?.sources).toContain("DHCP Reservation");
+    expect(reservation?.statusReason).toContain("DHCP reservation");
+    expect(reservation?.relatedPoolNames).toContain("10.10.2.51");
     expect(result.freeIps.some(item => item.ip === "10.10.2.51")).toBe(false);
   });
 
@@ -248,6 +252,16 @@ describe("analysis", () => {
     const candidate = result.ipInventory.find(item => item.ip === "10.30.30.10");
     expect(candidate?.status).toBe("Unknown");
     expect(candidate?.sources).toContain("Insufficient evidence for free-IP decision");
+    expect(candidate?.missingSources).toEqual(expect.arrayContaining(["ARP", "DHCP Binding", "MAC Table"]));
     expect(result.freeIps).toHaveLength(0);
+  });
+
+  it("explains likely free addresses only after required evidence is present", () => {
+    const result = analyzeCli(SAMPLE_DATA);
+    const freeCandidate = result.ipInventory.find(item => item.ip === "10.10.20.30");
+    expect(freeCandidate?.status).toBe("Likely Free");
+    expect(freeCandidate?.missingSources ?? []).toHaveLength(0);
+    expect(freeCandidate?.checkedSources).toEqual(expect.arrayContaining(["ARP", "DHCP Binding", "MAC Table"]));
+    expect(freeCandidate?.statusReason).toContain("No ARP");
   });
 });

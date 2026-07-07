@@ -104,15 +104,22 @@ function buildSubnets(dataset: ParsedDataset): SubnetRecord[] {
 
 function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInventoryRecord[] {
   const map = new Map<string, IpInventoryRecord>();
+  const commandSet = new Set(dataset.commandBlocks.filter(block => block.parsed).map(block => block.command));
+  const checkedSources = collectedSourceNames(commandSet);
+  const missingSources = missingFreeEvidence(commandSet);
   const touch = (ip: string, update: Partial<IpInventoryRecord>) => {
     const current = map.get(ip) ?? {
       ip,
       status: "Unknown",
+      statusReason: "No evidence has classified this IP yet.",
       confidence: 35,
       macs: [],
       vlans: [],
       ports: [],
       sources: [],
+      checkedSources: [],
+      missingSources: [],
+      relatedPoolNames: [],
       evidence: []
     } satisfies IpInventoryRecord;
     map.set(ip, {
@@ -123,29 +130,35 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       vlans: unique([...current.vlans, ...(update.vlans ?? [])]),
       ports: unique([...current.ports, ...(update.ports ?? [])]),
       sources: unique([...current.sources, ...(update.sources ?? [])]),
+      checkedSources: unique([...(current.checkedSources ?? []), ...(update.checkedSources ?? [])]),
+      missingSources: unique([...(current.missingSources ?? []), ...(update.missingSources ?? [])]),
+      relatedPoolNames: unique([...(current.relatedPoolNames ?? []), ...(update.relatedPoolNames ?? [])]),
       evidence: [...current.evidence, ...(update.evidence ?? [])]
     });
   };
-  const commandSet = new Set(dataset.commandBlocks.filter(block => block.parsed).map(block => block.command));
 
   for (const record of dataset.arp) {
     touch(record.ip, {
       status: record.mac ? "Used" : "Unknown",
+      statusReason: record.mac ? "ARP entry with MAC was found." : "ARP entry exists but no MAC was parsed, so the IP is not confirmed free.",
       confidence: record.mac ? 90 : 45,
       macs: record.mac ? [record.mac] : [],
       vlans: record.vlan ? [record.vlan] : [],
       ports: record.interfaceName ? [record.interfaceName] : [],
       sources: ["ARP"],
+      checkedSources,
       evidence: record.evidence
     });
   }
   for (const record of dataset.dhcpBindings) {
     touch(record.ip, {
       status: "Used",
+      statusReason: "DHCP binding or source-binding evidence exists for this IP.",
       confidence: record.mac ? 82 : 60,
       macs: record.mac ? [record.mac] : [],
       ports: record.interfaceName ? [record.interfaceName] : [],
       sources: ["DHCP Binding"],
+      checkedSources,
       evidence: record.evidence
     });
   }
@@ -153,9 +166,12 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
     if (!pool.host) continue;
     touch(pool.host, {
       status: "Reserved",
+      statusReason: "DHCP reservation or host pool is configured for this IP.",
       confidence: 100,
       macs: pool.hardwareAddress ? [pool.hardwareAddress] : [],
       sources: ["DHCP Reservation"],
+      checkedSources,
+      relatedPoolNames: [pool.name],
       evidence: pool.evidence
     });
   }
@@ -163,10 +179,12 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
     if (!record.ip) continue;
     touch(record.ip, {
       status: "Reserved",
+      statusReason: "Interface, SVI, or routed interface owns this IP.",
       confidence: 100,
       vlans: typeof record.vlan === "number" ? [record.vlan] : [],
       ports: [record.name],
       sources: ["Interface IP"],
+      checkedSources,
       evidence: record.evidence
     });
   }
@@ -184,8 +202,12 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
         if (pool) {
           touch(ip, {
             status: "Unknown",
+            statusReason: "IP is inside a dynamic DHCP pool; without lease, ARP, or MAC evidence it cannot be called free.",
             confidence: 55,
             sources: ["DHCP Pool range"],
+            checkedSources,
+            missingSources,
+            relatedPoolNames: [pool.name],
             evidence: pool.evidence
           });
           continue;
@@ -193,16 +215,22 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
         if (!hasEnoughEvidenceToCallFree(dataset, commandSet, subnet)) {
           touch(ip, {
             status: "Unknown",
+            statusReason: "Free-IP decision is blocked because required ARP, DHCP binding, MAC table, or subnet evidence is incomplete.",
             confidence: 30,
             sources: ["Insufficient evidence for free-IP decision"],
+            checkedSources,
+            missingSources,
             evidence: []
           });
           continue;
         }
         touch(ip, {
           status: "Likely Free",
+          statusReason: "No ARP, DHCP binding, MAC-table, reservation, interface, or dynamic-pool evidence was found after required checks.",
           confidence: 60,
           sources: ["Subnet gap", "No ARP/DHCP/MAC evidence"],
+          checkedSources,
+          missingSources: [],
           evidence: []
         });
       }
@@ -217,6 +245,28 @@ function findDynamicPoolForIp(dataset: ParsedDataset, ip: string) {
     if (pool.poolType === "Reservation" || pool.host || !pool.network || pool.prefix === undefined) return false;
     return ipInSubnet(ip, pool.network, pool.prefix);
   });
+}
+
+function collectedSourceNames(commandSet: Set<string>): string[] {
+  const names: string[] = [];
+  if (commandSet.has("show ip arp") || commandSet.has("show arp")) names.push("ARP");
+  if (commandSet.has("show ip dhcp binding") || commandSet.has("show ip dhcp snooping binding") || commandSet.has("show ip source binding")) {
+    names.push("DHCP Binding");
+  }
+  if (commandSet.has("show mac address-table")) names.push("MAC Table");
+  if (commandSet.has("show running-config")) names.push("Running Config");
+  if (commandSet.has("show ip interface brief")) names.push("Interface IP");
+  return names;
+}
+
+function missingFreeEvidence(commandSet: Set<string>): string[] {
+  const missing: string[] = [];
+  if (!commandSet.has("show ip arp") && !commandSet.has("show arp")) missing.push("ARP");
+  if (!commandSet.has("show ip dhcp binding") && !commandSet.has("show ip dhcp snooping binding") && !commandSet.has("show ip source binding")) {
+    missing.push("DHCP Binding");
+  }
+  if (!commandSet.has("show mac address-table")) missing.push("MAC Table");
+  return missing;
 }
 
 function hasEnoughEvidenceToCallFree(dataset: ParsedDataset, commandSet: Set<string>, subnet: SubnetRecord): boolean {

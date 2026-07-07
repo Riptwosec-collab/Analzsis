@@ -70,6 +70,14 @@ export function IpMacCheckDetails({ row, language }: IpMacCheckDetailsProps) {
             <dd>{row.description ?? (language === "th" ? "ไม่มีคำอธิบาย" : "No description")}</dd>
             <dt className="text-muted-foreground">{language === "th" ? "ที่มาคำอธิบาย" : "Description source"}</dt>
             <dd>{row.descriptionSource ?? "Unknown"}{row.descriptionConfidence !== undefined ? ` · ${row.descriptionConfidence}%` : ""}</dd>
+            <dt className="text-muted-foreground">{language === "th" ? "เหตุผลการจัดประเภท" : "Classification reason"}</dt>
+            <dd>{classificationReasonText(row, language)}</dd>
+            <dt className="text-muted-foreground">{language === "th" ? "หลักฐานที่ตรวจแล้ว" : "Checked sources"}</dt>
+            <dd>{row.checkedSources?.join(", ") || "-"}</dd>
+            <dt className="text-muted-foreground">{language === "th" ? "หลักฐานที่ยังขาด" : "Missing sources"}</dt>
+            <dd>{row.missingSources?.join(", ") || "-"}</dd>
+            <dt className="text-muted-foreground">{language === "th" ? "DHCP Pool ที่เกี่ยวข้อง" : "Related DHCP pools"}</dt>
+            <dd>{row.relatedPoolNames?.join(", ") || "-"}</dd>
             <dt className="text-muted-foreground">Subnet</dt>
             <dd className="font-mono">{model.subnets.join(", ") || "-"}</dd>
             <dt className="text-muted-foreground">ARP</dt>
@@ -331,6 +339,17 @@ function buildProblemLines({
       ? `${row.ip} ยังไม่ถือว่าว่าง เพราะคำสั่งตรวจ ARP/DHCP/MAC หรือ subnet evidence ยังไม่ครบ`
       : `${row.ip} is not treated as free because ARP/DHCP/MAC or subnet evidence is incomplete.`);
   }
+  if (row.missingSources?.length) {
+    lines.push(language === "th"
+      ? `หลักฐานที่ยังขาดก่อนยืนยันว่า IP ว่างได้: ${row.missingSources.join(", ")}`
+      : `Missing evidence before this IP can be treated as likely free: ${row.missingSources.join(", ")}`);
+  }
+  if (row.statusReason) {
+    const reason = classificationReasonText(row, language);
+    if (!lines.some(line => line.includes(reason))) {
+      lines.push(language === "th" ? `เหตุผลระบบ: ${reason}` : `Classifier reason: ${reason}`);
+    }
+  }
   if (row.macs.length > 1 || duplicateFinding) {
     lines.push(language === "th"
       ? `${row.ip} มีหลาย MAC หรือมี finding ประเภท duplicate: ${row.macs.join(", ") || relatedFindings.map(item => item.target).filter(Boolean).join(", ")}`
@@ -362,6 +381,18 @@ function buildProblemLines({
       : `Related DHCP pool(s): ${networkPools.map(pool => pool.name).join(", ")}`);
   }
   return lines;
+}
+
+function classificationReasonText(row: IpInventoryRecord, language: "en" | "th") {
+  if (language === "en") return row.statusReason ?? "-";
+  if (row.status === "Used" && row.sources.includes("ARP")) return "พบ ARP entry ที่ผูก IP กับ MAC จึงถือว่าใช้งานอยู่";
+  if (row.status === "Used" && row.sources.includes("DHCP Binding")) return "พบ DHCP binding หรือ source-binding ของ IP นี้ จึงถือว่าใช้งานอยู่";
+  if (row.status === "Reserved" && row.sources.includes("DHCP Reservation")) return "พบ DHCP reservation หรือ host pool ที่จอง IP นี้ไว้";
+  if (row.status === "Reserved" && row.sources.includes("Interface IP")) return "IP นี้ถูกใช้เป็น IP ของ Interface, SVI หรือ routed interface";
+  if (row.status === "Unknown" && row.sources.includes("DHCP Pool range")) return "IP อยู่ใน dynamic DHCP pool จึงห้ามสรุปว่าว่างจนกว่าจะมี lease, ARP หรือ MAC evidence เพิ่ม";
+  if (row.status === "Unknown" && row.sources.includes("Insufficient evidence for free-IP decision")) return "ยังขาดหลักฐาน ARP, DHCP binding, MAC table หรือ subnet evidence จึงยังไม่ยืนยันว่า IP ว่าง";
+  if (row.status === "Likely Free") return "ตรวจหลักฐานที่จำเป็นแล้วไม่พบ ARP, DHCP binding, MAC-table, reservation, interface หรือ dynamic-pool evidence ของ IP นี้";
+  return row.statusReason ?? "-";
 }
 
 function commandCheck(id: string, title: string, collected: boolean, matches: number, detail: string, sources: string[]): CheckItem {
