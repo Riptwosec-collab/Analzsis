@@ -215,14 +215,16 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       if (!map.has(ip) && !arpIps.has(ip)) {
         const pool = findDynamicPoolForIp(dataset, ip);
         if (pool) continue;
-        if (!hasEnoughEvidenceToCallFree(dataset, commandSet, subnet)) continue;
+        const hasFullEvidence = hasEnoughEvidenceToCallFree(dataset, commandSet, subnet);
         touch(ip, {
           status: "Likely Free",
-          statusReason: "No ARP, DHCP binding, MAC-table, reservation, interface, or dynamic-pool evidence was found after required checks.",
-          confidence: 60,
-          sources: ["Subnet gap", "No ARP/DHCP/MAC evidence"],
+          statusReason: hasFullEvidence
+            ? "No ARP, DHCP binding, MAC-table, reservation, interface, or dynamic-pool evidence was found after required checks."
+            : "Config-derived subnet gap outside DHCP pools, reservations, and interface IPs. Treat as a likely free candidate that still needs ARP, DHCP binding, and MAC-table verification.",
+          confidence: hasFullEvidence ? 60 : 35,
+          sources: hasFullEvidence ? ["Subnet gap", "No ARP/DHCP/MAC evidence"] : ["Subnet gap", "Config-only candidate", "Outside DHCP Pool"],
           checkedSources,
-          missingSources: [],
+          missingSources: hasFullEvidence ? [] : missingSources,
           evidence: []
         });
       }

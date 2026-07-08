@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { AuditModal } from "@/components/audit-modal";
+import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAnalysisStore } from "@/store/analysis-store";
@@ -91,8 +93,13 @@ export function SubnetCheckDetails({ subnet, language }: SubnetCheckDetailsProps
     () => result ? buildSubnetModel(subnet, result, language) : null,
     [language, result, subnet]
   );
+  const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
+  const [selectedFreeIp, setSelectedFreeIp] = useState<string | null>(null);
 
   if (!model) return null;
+
+  const selectedCheck = model.checks.find(check => check.id === selectedCheckId);
+  const selectedFree = model.freeCandidates.find(row => row.ip === selectedFreeIp);
 
   return (
     <section className="mt-4 space-y-4 rounded-xl border border-cyan-400/20 bg-slate-950/35 p-4">
@@ -132,10 +139,15 @@ export function SubnetCheckDetails({ subnet, language }: SubnetCheckDetailsProps
         {model.freeCandidates.length ? (
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {model.freeCandidates.slice(0, 32).map(row => (
-              <div key={row.ip} className="rounded-md border border-emerald-400/15 bg-black/20 p-2 text-xs">
+              <button
+                key={row.ip}
+                type="button"
+                onClick={() => setSelectedFreeIp(row.ip)}
+                className="rounded-md border border-emerald-400/15 bg-black/20 p-2 text-left text-xs hover:bg-emerald-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+              >
                 <div className="font-mono text-emerald-100">{row.ip}</div>
                 <div className="mt-1 text-muted-foreground">{row.statusReason ?? row.sources.join(", ")}</div>
-              </div>
+              </button>
             ))}
           </div>
         ) : (
@@ -147,23 +159,64 @@ export function SubnetCheckDetails({ subnet, language }: SubnetCheckDetailsProps
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {model.checks.map(check => (
-          <article key={check.id} className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+          <button
+            key={check.id}
+            type="button"
+            onClick={() => setSelectedCheckId(check.id)}
+            className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3 text-left hover:bg-cyan-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+          >
             <div className="flex items-start justify-between gap-2">
               <div className="text-sm font-medium">{check.title}</div>
               <Badge severity={stateSeverity(check.state)}>{stateLabel(check.state, language)}</Badge>
             </div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">{check.summary}</p>
-            {check.details.length ? (
-              <ul className="mt-2 space-y-1 text-[11px] leading-5 text-cyan-50/75">
-                {check.details.slice(0, 8).map((detail, index) => <li key={`${check.id}-${index}`}>• {detail}</li>)}
-              </ul>
-            ) : null}
             <div className="mt-2 text-[11px] text-cyan-100/65">
               {language === "th" ? "ตรวจจาก:" : "Sources:"} {check.sources.join(", ") || "-"}
             </div>
-          </article>
+          </button>
         ))}
       </div>
+
+      <AuditModal
+        open={Boolean(selectedCheck)}
+        onClose={() => setSelectedCheckId(null)}
+        title={selectedCheck ? `${language === "th" ? "รายละเอียดหัวข้อ" : "Check detail"}: ${selectedCheck.title}` : ""}
+        subtitle={selectedCheck?.summary}
+      >
+        {selectedCheck ? (
+          <div className="space-y-4 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge severity={stateSeverity(selectedCheck.state)}>{stateLabel(selectedCheck.state, language)}</Badge>
+              <span className="text-xs text-muted-foreground">{selectedCheck.sources.join(", ") || "-"}</span>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{language === "th" ? "ข้อมูลที่เกี่ยวข้องกับหัวข้อนี้" : "Related data for this check"}</div>
+              {selectedCheck.details.length ? (
+                <ul className="mt-2 space-y-1 text-xs leading-5 text-cyan-50/80">
+                  {selectedCheck.details.map((detail, index) => <li key={`${selectedCheck.id}-detail-${index}`}>- {detail}</li>)}
+                </ul>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">{language === "th" ? "ไม่พบรายการเฉพาะของหัวข้อนี้" : "No item-specific rows were found for this check."}</p>
+              )}
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{language === "th" ? "หลักฐานเฉพาะหัวข้อนี้" : "Evidence for this check"}</div>
+              <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-[11px] leading-5 text-cyan-50/80">
+                {selectedCheck.evidence.map(formatEvidence).join("\n") || (language === "th" ? "ไม่มีบรรทัดหลักฐานโดยตรง" : "No direct evidence lines")}
+              </pre>
+            </div>
+          </div>
+        ) : null}
+      </AuditModal>
+
+      <AuditModal
+        open={Boolean(selectedFree)}
+        onClose={() => setSelectedFreeIp(null)}
+        title={selectedFree ? `IP / MAC detail: ${selectedFree.ip}` : ""}
+        subtitle={selectedFree ? `${selectedFree.status} · ${selectedFree.sources.join(", ") || "No source"}` : ""}
+      >
+        {selectedFree ? <IpMacCheckDetails row={selectedFree} language={language} /> : null}
+      </AuditModal>
 
       <details open className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
         <summary className="cursor-pointer text-sm font-medium">

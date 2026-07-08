@@ -240,15 +240,18 @@ describe("analysis", () => {
     expect(result.freeIps.some(item => item.ip === "10.10.2.51")).toBe(false);
   });
 
-  it("does not enumerate subnet gaps when ARP DHCP and MAC evidence is incomplete", () => {
+  it("marks config-only subnet gaps outside DHCP pools as low-confidence likely free candidates", () => {
     const result = analyzeCli([
       "CORE-SW01#show running-config",
       "interface Vlan30",
       " ip address 10.30.30.1 255.255.255.0"
     ].join("\n"));
     const candidate = result.ipInventory.find(item => item.ip === "10.30.30.10");
-    expect(candidate).toBeUndefined();
-    expect(result.freeIps).toHaveLength(0);
+    expect(candidate?.status).toBe("Likely Free");
+    expect(candidate?.confidence).toBe(35);
+    expect(candidate?.sources).toEqual(expect.arrayContaining(["Config-only candidate", "Outside DHCP Pool"]));
+    expect(candidate?.missingSources).toEqual(expect.arrayContaining(["ARP", "DHCP Binding", "MAC Table"]));
+    expect(result.freeIps.some(item => item.ip === "10.30.30.10")).toBe(true);
   });
 
   it("keeps evidence-backed unresolved log IPs as unknown", () => {
@@ -263,7 +266,8 @@ describe("analysis", () => {
     expect(logIp?.status).toBe("Unknown");
     expect(logIp?.sources).toContain("Log/Security Event");
     expect(logIp?.missingSources).toEqual(expect.arrayContaining(["ARP", "DHCP Binding", "MAC Table"]));
-    expect(result.freeIps).toHaveLength(0);
+    expect(result.freeIps.some(item => item.ip === "10.40.40.25")).toBe(false);
+    expect(result.freeIps.length).toBeGreaterThan(0);
   });
 
   it("explains likely free addresses only after required evidence is present", () => {
