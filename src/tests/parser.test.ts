@@ -226,8 +226,51 @@ describe("analysis", () => {
   it("does not enumerate addresses inside a DHCP dynamic pool as unknown or likely free without lease evidence", () => {
     const result = analyzeCli(SAMPLE_DATA);
     const poolCandidate = result.ipInventory.find(item => item.ip === "10.10.10.30");
-    expect(poolCandidate).toBeUndefined();
+    expect(poolCandidate?.status).toBe("Not Free - In DHCP Pool");
+    expect(poolCandidate?.sources).toContain("DHCP Pool range");
     expect(result.freeIps.some(item => item.ip === "10.10.10.30")).toBe(false);
+  });
+
+  it("parses DHCP exclusions, conflicts, snooping bindings, and source bindings into distinct IP states", () => {
+    const result = analyzeCli([
+      "CORE-SW01#show running-config",
+      "ip dhcp excluded-address 10.50.50.1 10.50.50.10",
+      "interface Vlan50",
+      " ip address 10.50.50.1 255.255.255.0",
+      "!",
+      "ip dhcp pool USERS",
+      " network 10.50.50.0 255.255.255.0",
+      " default-router 10.50.50.1",
+      " dns-server 10.20.100.2",
+      "CORE-SW01#show ip dhcp conflict",
+      "IP address        Detection method   Detection time",
+      "10.50.50.20      Gratuitous ARP     Jan 01 2026 10:00 AM",
+      "CORE-SW01#show ip dhcp snooping binding",
+      "MacAddress          IpAddress        Lease(sec) Type           VLAN  Interface",
+      "0011.2233.4455      10.50.50.30      86400      dhcp-snooping  50    Gi1/0/5",
+      "CORE-SW01#show ip source binding",
+      "MacAddress          IpAddress        Lease(sec) Type           VLAN  Interface",
+      "0011.2233.4466      10.50.50.31      86400      static         50    Gi1/0/6",
+      "CORE-SW01#show ip arp",
+      "Protocol  Address          Age (min)  Hardware Addr   Type   Interface",
+      "Internet  10.50.50.30             2   0011.2233.4455  ARPA   Vlan50",
+      "CORE-SW01#show mac address-table",
+      "Vlan    Mac Address       Type        Ports",
+      "  50    0011.2233.4455    DYNAMIC     Gi1/0/5",
+      "  50    0011.2233.4466    DYNAMIC     Gi1/0/6"
+    ].join("\n"));
+
+    expect(result.dhcpExcludedRanges).toHaveLength(1);
+    expect(result.dhcpConflicts).toHaveLength(1);
+    expect(result.dhcpBindings.some(item => item.ip === "10.50.50.30" && item.mac === "00:11:22:33:44:55")).toBe(true);
+    expect(result.dhcpBindings.some(item => item.ip === "10.50.50.31" && item.type === "Source Binding")).toBe(true);
+
+    expect(result.ipInventory.find(item => item.ip === "10.50.50.2")?.status).toBe("Excluded");
+    expect(result.ipInventory.find(item => item.ip === "10.50.50.20")?.sources).toContain("DHCP Conflict");
+    expect(result.ipInventory.find(item => item.ip === "10.50.50.30")?.status).toBe("Used");
+    expect(result.ipInventory.find(item => item.ip === "10.50.50.31")?.status).toBe("Used");
+    expect(result.ipInventory.find(item => item.ip === "10.50.50.40")?.status).toBe("Not Free - In DHCP Pool");
+    expect(result.freeIps.some(item => item.ip === "10.50.50.40")).toBe(false);
   });
 
   it("marks DHCP reservation host addresses as reserved", () => {

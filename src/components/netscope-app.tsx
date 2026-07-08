@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Children, isValidElement, useMemo, useState, type ReactNode } from "react";
 import { Background, Controls, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import {
   Activity,
@@ -32,6 +32,7 @@ import { exportExcel, exportJson, exportMarkdown, exportPdf } from "@/services/e
 import { sanitizeCli, scanSensitiveData } from "@/services/sanitization/sanitizer";
 import { useAnalysisStore } from "@/store/analysis-store";
 import type { AnalysisResult, Finding, IpInventoryRecord, SecurityCheck, Severity } from "@/types/network";
+import { ipInSubnet, ipToNumber } from "@/utils/ip";
 import { AuditModal } from "@/components/audit-modal";
 import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
 import { SubnetCheckDetails } from "@/components/subnet-check-details";
@@ -810,7 +811,9 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
 
 function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
   const [selectedName, setSelectedName] = useState(result.dhcpPools[0]?.name ?? "");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const selected = result.dhcpPools.find(pool => pool.name === selectedName) ?? result.dhcpPools[0];
+  const selectedStats = selected ? poolStats(result, selected) : null;
   return (
     <Card>
       <CardHeader>
@@ -818,40 +821,100 @@ function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
         <CardDescription>{result.dhcpPools.length} {t.panels.currentRows}</CardDescription>
       </CardHeader>
       <CardContent>
-        <DataTable headers={["Pool", "Network", t.metrics.used, "Total", "%", "Gateway", "DNS"]}>
+        <DataTable headers={["Pool", "Network", "Leased", "Pool free", "Excluded", "Reserved", "Conflict", "%", "Gateway"]}>
           {result.dhcpPools.map(pool => (
             <TableRow
               key={pool.name}
-              onClick={() => setSelectedName(pool.name)}
+              onClick={() => {
+                setSelectedName(pool.name);
+                setDetailsOpen(true);
+              }}
               className={cn("cursor-pointer", selected?.name === pool.name && "bg-cyan-400/10")}
             >
+              {(() => {
+                const stats = poolStats(result, pool);
+                return (
+                  <>
               <TableCell className="font-mono">{pool.name}</TableCell>
               <TableCell className="font-mono">{pool.network ? `${pool.network}/${pool.prefix ?? "-"}` : "-"}</TableCell>
-              <TableCell>{pool.leased ?? "-"}</TableCell>
-              <TableCell>{pool.total ?? "-"}</TableCell>
+              <TableCell>{stats.leased}</TableCell>
+              <TableCell>{stats.poolFree}</TableCell>
+              <TableCell>{stats.excluded}</TableCell>
+              <TableCell>{stats.reserved}</TableCell>
+              <TableCell>{stats.conflicts}</TableCell>
               <TableCell>{pool.utilization ?? "-"}%</TableCell>
               <TableCell className="font-mono">{pool.defaultRouters.join(", ") || "-"}</TableCell>
-              <TableCell className="font-mono">{pool.dnsServers.join(", ") || "-"}</TableCell>
+                  </>
+                );
+              })()}
             </TableRow>
           ))}
         </DataTable>
-        {selected ? (
-          <DetailBlock
-            title={`${detailLabel(t)}: ${selected.name}`}
-            lines={[
-              `Network: ${selected.network ?? "-"}/${selected.prefix ?? "-"}`,
-              `${t.metrics.used}: ${selected.leased ?? "-"}`,
-              `Total: ${selected.total ?? "-"}`,
-              `Utilization: ${selected.utilization ?? "-"}%`,
-              `Gateway: ${selected.defaultRouters.join(", ") || "-"}`,
-              `DNS: ${selected.dnsServers.join(", ") || "-"}`,
-              "",
-              ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
-            ]}
-          />
+        {selected && selectedStats ? (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
+            <div className="font-mono text-cyan-100">{selected.name}</div>
+            <div>Leased: {selectedStats.leased}</div>
+            <div>Pool free: {selectedStats.poolFree}</div>
+            <div>Excluded: {selectedStats.excluded}</div>
+            <div>Conflict: {selectedStats.conflicts}</div>
+            <Button type="button" size="sm" onClick={() => setDetailsOpen(true)}>Open selected DHCP pool detail</Button>
+          </div>
+        ) : null}
+        {selected && selectedStats ? (
+          <AuditModal
+            open={detailsOpen}
+            onClose={() => setDetailsOpen(false)}
+            title={`DHCP pool detail: ${selected.name}`}
+            subtitle={`${selected.network ?? "-"}/${selected.prefix ?? "-"} · pool free is not reusable free IP`}
+          >
+            <DhcpPoolDetail pool={selected} stats={selectedStats} />
+          </AuditModal>
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function DhcpPoolDetail({ pool, stats }: { pool: AnalysisResult["dhcpPools"][number]; stats: ReturnType<typeof poolStats> }) {
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <DetailMetric label="Leased" value={stats.leased} />
+        <DetailMetric label="Pool free" value={stats.poolFree} />
+        <DetailMetric label="Excluded" value={stats.excluded} />
+        <DetailMetric label="Conflicts" value={stats.conflicts} />
+      </div>
+      <div className="rounded-lg border border-yellow-400/20 bg-yellow-400/5 p-3 text-xs leading-5">
+        Pool free means addresses not currently leased inside the DHCP scope. It is not the same as reusable static free IP. Excluded, reserved, conflict, interface, and active binding evidence must be checked first.
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <PoolList title="Excluded ranges" rows={stats.excludedRanges.map(item => `${item.startIp}${item.endIp !== item.startIp ? ` - ${item.endIp}` : ""}`)} />
+        <PoolList title="Reservations" rows={stats.reservationsRows.map(item => `${item.host} · ${item.clientIdentifier ?? item.hardwareAddress ?? "-"}`)} />
+        <PoolList title="Conflicts" rows={stats.conflictRows.map(item => `${item.ip} · ${item.detectionMethod ?? "-"} · ${item.detectionTime ?? "-"}`)} />
+        <PoolList title="Gateway / DNS" rows={[`Gateway: ${pool.defaultRouters.join(", ") || "-"}`, `DNS: ${pool.dnsServers.join(", ") || "-"}`]} />
+      </div>
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-[11px] leading-5 text-cyan-50/80">
+        {pool.evidence.map(line => `${line.device}:${line.line} [${line.command}] ${line.text}`).join("\n") || "No evidence"}
+      </pre>
+    </div>
+  );
+}
+
+function DetailMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-cyan-400/15 bg-black/20 p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 font-mono text-xl font-semibold text-cyan-100">{value}</div>
+    </div>
+  );
+}
+
+function PoolList({ title, rows }: { title: string; rows: string[] }) {
+  return (
+    <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+      <div className="text-sm font-medium">{title}</div>
+      {rows.length ? <ul className="mt-2 space-y-1 text-xs">{rows.map(row => <li key={row}>- {row}</li>)}</ul> : <p className="mt-2 text-xs text-muted-foreground">-</p>}
+    </div>
   );
 }
 
@@ -895,7 +958,7 @@ function IpTable({
               className={cn("cursor-pointer", selected?.ip === row.ip && "bg-cyan-400/10")}
             >
               <TableCell className="font-mono">{row.ip}</TableCell>
-              <TableCell><Badge severity={row.status === "Used" ? "Passed" : row.status === "Likely Free" ? "Low" : "Info"}>{translateIpStatus(row.status, t)}</Badge></TableCell>
+              <TableCell><Badge severity={ipStatusSeverity(row.status)}>{translateIpStatus(row.status, t)}</Badge></TableCell>
               <TableCell>{row.confidence}%</TableCell>
               <TableCell className="font-mono">{row.macs.join(", ") || "-"}</TableCell>
               <TableCell>{row.vlans.join(", ") || "-"}</TableCell>
@@ -1164,17 +1227,123 @@ function Settings({ t }: { t: Copy }) {
   );
 }
 
+function poolStats(result: AnalysisResult, pool: AnalysisResult["dhcpPools"][number]) {
+  const inPool = (ip: string) => Boolean(pool.network && pool.prefix !== undefined && ipInSubnet(ip, pool.network, pool.prefix));
+  const excludedRanges = result.dhcpExcludedRanges.filter(range => inPool(range.startIp) || inPool(range.endIp));
+  const excluded = excludedRanges.reduce((total, range) => total + ipRangeCount(range.startIp, range.endIp), 0);
+  const reservations = result.dhcpPools.filter(item => item.host && inPool(item.host));
+  const conflictRows = result.dhcpConflicts.filter(item => inPool(item.ip));
+  const leased = pool.leased ?? result.dhcpBindings.filter(item => inPool(item.ip)).length;
+  const total = pool.total ?? 0;
+  const poolFree = Math.max(0, total - leased - excluded - reservations.length - conflictRows.length);
+  return { leased, total, poolFree, excluded, reserved: reservations.length, conflicts: conflictRows.length, excludedRanges, conflictRows, reservationsRows: reservations };
+}
+
+function ipRangeCount(startIp: string, endIp: string) {
+  const start = ipToNumber(startIp);
+  const end = ipToNumber(endIp);
+  if (start === null || end === null) return 0;
+  return Math.max(0, end - start + 1);
+}
+
 function DataTable({ headers, children }: { headers: string[]; children: React.ReactNode }) {
+  const rows = Children.toArray(children);
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<{ column: number; direction: "asc" | "desc" } | null>(null);
+  const pageSize = 100;
+  const [page, setPage] = useState(0);
+  const filteredRows = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    return q ? rows.filter(row => nodeText(row).toLowerCase().includes(q)) : rows;
+  }, [filter, rows]);
+  const sortedRows = useMemo(() => {
+    if (!sort) return filteredRows;
+    return [...filteredRows].sort((a, b) => {
+      const left = cellTexts(a)[sort.column] ?? "";
+      const right = cellTexts(b)[sort.column] ?? "";
+      const numericLeft = Number(left.replace(/[%,$]/g, ""));
+      const numericRight = Number(right.replace(/[%,$]/g, ""));
+      const result = Number.isFinite(numericLeft) && Number.isFinite(numericRight)
+        ? numericLeft - numericRight
+        : left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+      return sort.direction === "asc" ? result : -result;
+    });
+  }, [filteredRows, sort]);
+  const pageCount = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleRows = sortedRows.slice(currentPage * pageSize, currentPage * pageSize + pageSize);
   return (
-    <div className="cyber-table overflow-auto rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>{headers.map(header => <TableHead key={header}>{header}</TableHead>)}</TableRow>
-        </TableHeader>
-        <TableBody>{children}</TableBody>
-      </Table>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <input
+          value={filter}
+          onChange={event => {
+            setFilter(event.target.value);
+            setPage(0);
+          }}
+          placeholder="Filter table"
+          className="h-9 min-w-56 rounded-lg border px-3 text-xs"
+        />
+        <span className="text-xs text-muted-foreground">{sortedRows.length} / {rows.length} rows</span>
+      </div>
+      <div className="cyber-table overflow-auto rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {headers.map((header, column) => (
+                <TableHead key={header}>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 text-left hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+                    onClick={() => {
+                      setSort(current => current?.column === column
+                        ? { column, direction: current.direction === "asc" ? "desc" : "asc" }
+                        : { column, direction: "asc" });
+                      setPage(0);
+                    }}
+                  >
+                    {header}
+                    <span className="text-[10px] text-muted-foreground">{sort?.column === column ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+                  </button>
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>{visibleRows}</TableBody>
+        </Table>
+      </div>
+      {sortedRows.length > pageSize ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>Showing {currentPage * pageSize + 1}-{Math.min(sortedRows.length, (currentPage + 1) * pageSize)} of {sortedRows.length}</span>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={currentPage === 0} onClick={() => setPage(value => Math.max(0, value - 1))}>Prev</Button>
+            <Button type="button" size="sm" variant="outline" disabled={currentPage >= pageCount - 1} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}>Next</Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function cellTexts(row: ReactNode): string[] {
+  if (!isValidElement<{ children?: ReactNode }>(row)) return [nodeText(row)];
+  return flattenCells(row.props.children).map(nodeText);
+}
+
+function flattenCells(node: ReactNode): ReactNode[] {
+  return Children.toArray(node).flatMap(child => {
+    if (!isValidElement<{ children?: ReactNode }>(child)) return [child];
+    const typeName = typeof child.type === "string" ? child.type : "";
+    if (typeName === "td" || typeName === "th") return [child];
+    return flattenCells(child.props.children);
+  });
+}
+
+function nodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join(" ");
+  if (isValidElement<{ children?: ReactNode }>(node)) return nodeText(node.props.children);
+  return "";
 }
 
 function DetailBlock({ title, lines }: { title: string; lines: string[] }) {
@@ -1382,8 +1551,17 @@ function translateIpStatus(status: IpInventoryRecord["status"], t: Copy) {
     Used: "ใช้งาน",
     "Likely Free": "น่าจะว่าง",
     Reserved: "สงวนไว้",
+    Excluded: "กันไว้",
+    "Not Free - In DHCP Pool": "อยู่ใน DHCP Pool",
     Unknown: "ไม่ทราบ"
   }[status];
+}
+
+function ipStatusSeverity(status: IpInventoryRecord["status"]): Severity {
+  if (status === "Used") return "Passed";
+  if (status === "Likely Free") return "Low";
+  if (status === "Unknown") return "Info";
+  return "Medium";
 }
 
 function translateCheckStatus(status: SecurityCheck["status"], t: Copy) {

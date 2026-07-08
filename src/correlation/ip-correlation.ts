@@ -16,6 +16,7 @@ export function correlate(dataset: ParsedDataset): AnalysisResult {
     ...findDuplicateIpFindings(ipInventory),
     ...findMacFlapping(dataset),
     ...findDhcpPoolIssues(dataset),
+    ...findDhcpConflicts(dataset),
     ...findLogFindings(dataset)
   ];
   const securityChecks = buildSecurityChecks(dataset);
@@ -122,9 +123,13 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       relatedPoolNames: [],
       evidence: []
     } satisfies IpInventoryRecord;
+    const status = chooseStatus(current.status, update.status);
+    const statusAccepted = !update.status || status === update.status;
     map.set(ip, {
       ...current,
       ...update,
+      status,
+      statusReason: statusAccepted ? (update.statusReason ?? current.statusReason) : current.statusReason,
       confidence: Math.max(current.confidence, update.confidence ?? 0),
       macs: unique([...current.macs, ...(update.macs ?? [])]),
       vlans: unique([...current.vlans, ...(update.vlans ?? [])]),
@@ -177,6 +182,17 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       evidence: record.evidence
     });
   }
+  for (const conflict of dataset.dhcpConflicts) {
+    touch(conflict.ip, {
+      status: "Unknown",
+      statusReason: "DHCP conflict evidence exists for this IP. It must be verified before reuse.",
+      confidence: 80,
+      sources: ["DHCP Conflict"],
+      checkedSources,
+      missingSources,
+      evidence: conflict.evidence
+    });
+  }
   for (const pool of dataset.dhcpPools) {
     if (!pool.host) continue;
     touch(pool.host, {
@@ -189,6 +205,23 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       relatedPoolNames: [pool.name],
       evidence: pool.evidence
     });
+  }
+  for (const range of dataset.dhcpExcludedRanges) {
+    const start = ipToNumber(range.startIp);
+    const end = ipToNumber(range.endIp);
+    if (start === null || end === null) continue;
+    const count = Math.min(4096, Math.max(0, end - start + 1));
+    for (let offset = 0; offset < count; offset += 1) {
+      const ip = numberToIp(start + offset);
+      touch(ip, {
+        status: "Excluded",
+        statusReason: "IP is configured under ip dhcp excluded-address and must not be treated as free.",
+        confidence: 100,
+        sources: ["DHCP Excluded"],
+        checkedSources,
+        evidence: range.evidence
+      });
+    }
   }
   for (const record of dataset.interfaces) {
     if (!record.ip) continue;
@@ -213,8 +246,31 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
     for (let value = start; value <= end; value += 1) {
       const ip = numberToIp(value);
       if (!map.has(ip) && !arpIps.has(ip)) {
+        const excluded = findExcludedRangeForIp(dataset, ip);
+        if (excluded) {
+          touch(ip, {
+            status: "Excluded",
+            statusReason: "IP is configured under ip dhcp excluded-address and must not be treated as free.",
+            confidence: 100,
+            sources: ["DHCP Excluded"],
+            checkedSources,
+            evidence: excluded.evidence
+          });
+          continue;
+        }
         const pool = findDynamicPoolForIp(dataset, ip);
-        if (pool) continue;
+        if (pool) {
+          touch(ip, {
+            status: "Not Free - In DHCP Pool",
+            statusReason: "IP is inside a dynamic DHCP pool. Pool capacity is not the same as a reusable free IP.",
+            confidence: 95,
+            sources: ["DHCP Pool range"],
+            checkedSources,
+            relatedPoolNames: [pool.name],
+            evidence: pool.evidence
+          });
+          continue;
+        }
         const hasFullEvidence = hasEnoughEvidenceToCallFree(dataset, commandSet, subnet);
         touch(ip, {
           status: "Likely Free",
@@ -234,10 +290,32 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
   return [...map.values()].sort((a, b) => (ipToNumber(a.ip) ?? 0) - (ipToNumber(b.ip) ?? 0));
 }
 
+function chooseStatus(current: IpInventoryRecord["status"], next?: IpInventoryRecord["status"]) {
+  if (!next) return current;
+  const rank: Record<IpInventoryRecord["status"], number> = {
+    Unknown: 0,
+    "Likely Free": 1,
+    "Not Free - In DHCP Pool": 2,
+    Used: 3,
+    Excluded: 4,
+    Reserved: 5
+  };
+  return rank[next] >= rank[current] ? next : current;
+}
+
 function findDynamicPoolForIp(dataset: ParsedDataset, ip: string) {
   return dataset.dhcpPools.find(pool => {
     if (pool.poolType === "Reservation" || pool.host || !pool.network || pool.prefix === undefined) return false;
     return ipInSubnet(ip, pool.network, pool.prefix);
+  });
+}
+
+function findExcludedRangeForIp(dataset: ParsedDataset, ip: string) {
+  return dataset.dhcpExcludedRanges.find(range => {
+    const value = ipToNumber(ip);
+    const start = ipToNumber(range.startIp);
+    const end = ipToNumber(range.endIp);
+    return value !== null && start !== null && end !== null && value >= start && value <= end;
   });
 }
 
@@ -333,6 +411,21 @@ function findDhcpPoolIssues(dataset: ParsedDataset): Finding[] {
     evidence: pool.evidence,
     recommendation: "Review lease duration, stale bindings, excluded ranges, and whether the scope needs expansion.",
     verificationCommands: ["show ip dhcp pool", "show ip dhcp binding", "show ip dhcp conflict"]
+  }));
+}
+
+function findDhcpConflicts(dataset: ParsedDataset): Finding[] {
+  return dataset.dhcpConflicts.map((conflict, index): Finding => ({
+    id: `dhcp-conflict-${index}`,
+    severity: "High",
+    category: "DHCP",
+    title: "DHCP conflict detected",
+    target: conflict.ip,
+    description: `${conflict.ip} appears in DHCP conflict evidence${conflict.detectionMethod ? ` via ${conflict.detectionMethod}` : ""}.`,
+    confidence: 92,
+    evidence: conflict.evidence,
+    recommendation: "Verify the endpoint with ARP, MAC table, and DHCP binding before reusing or clearing the conflict.",
+    verificationCommands: [`show ip dhcp conflict | include ${conflict.ip}`, `show ip arp ${conflict.ip}`, "show mac address-table"]
   }));
 }
 

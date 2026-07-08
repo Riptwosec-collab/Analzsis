@@ -3,6 +3,7 @@ import type {
   ArpRecord,
   CommandBlock,
   DhcpBindingRecord,
+  DhcpConflictRecord,
   DhcpPoolRecord,
   InterfaceRecord,
   LogRecord,
@@ -29,6 +30,8 @@ export function emptyDataset(lineCount: number): ParsedDataset {
     macTable: [],
     dhcpBindings: [],
     dhcpPools: [],
+    dhcpExcludedRanges: [],
+    dhcpConflicts: [],
     interfaces: [],
     vlans: [],
     vrfs: [],
@@ -109,6 +112,8 @@ export function parseBlock(block: CommandBlock, dataset: ParsedDataset): Command
       dataset.accessLists.push(...parseAccessLists(block));
       return parsed(block);
     case "show ip dhcp conflict":
+      dataset.dhcpConflicts.push(...parseDhcpConflicts(block));
+      return parsed(block, "cisco-ios-operational", ["show ip dhcp binding", "show ip arp"]);
     case "show ip dhcp snooping":
     case "show ip arp inspection":
     case "show interfaces counters errors":
@@ -220,7 +225,22 @@ function parseMacTable(block: CommandBlock): MacRecord[] {
 function parseDhcpBindings(block: CommandBlock): DhcpBindingRecord[] {
   return block.lines.flatMap(line => {
     const text = line.text.trim();
-    if (!/^\d+\.\d+\.\d+\.\d+/.test(text) || /^IP address/i.test(text)) return [];
+    if (/^(IP address|MacAddress|Hardware|[-\s]+$)/i.test(text)) return [];
+    const macFirst = text.match(/^([0-9a-f.:-]{12,17})\s+(\d+\.\d+\.\d+\.\d+)\s+(\S+)\s+(\S+)\s+(\d+)\s+(\S+)/i);
+    if (macFirst) {
+      const mac = normalizeMac(macFirst[1]);
+      return [{
+        ip: macFirst[2],
+        mac,
+        clientIdentifier: macFirst[1],
+        lease: macFirst[3],
+        type: block.command === "show ip source binding" ? "Source Binding" : macFirst[4],
+        state: "Active",
+        interfaceName: normalizeInterface(macFirst[6]),
+        evidence: [makeEvidence(block, line)]
+      }];
+    }
+    if (!/^\d+\.\d+\.\d+\.\d+/.test(text)) return [];
     const parts = text.split(/\s+/);
     const ip = parts[0];
     const identifier = parts[1];
@@ -236,6 +256,24 @@ function parseDhcpBindings(block: CommandBlock): DhcpBindingRecord[] {
       type: /Manual|Reservation|Infinite/i.test(text) ? "Reservation" : "Dynamic",
       interfaceName: iface,
       evidence: [makeEvidence(block, line)]
+    }];
+  });
+}
+
+function parseDhcpConflicts(block: CommandBlock): DhcpConflictRecord[] {
+  return block.lines.flatMap(line => {
+    const text = line.text.trim();
+    if (/^(IP address|Address|[-\s]+$)/i.test(text)) return [];
+    const match = text.match(/^(\d+\.\d+\.\d+\.\d+)\s+(.+?)(?:\s{2,}|\s+)(.+)?$/);
+    if (!match) return [];
+    return [{
+      ip: match[1],
+      detectionMethod: match[2]?.trim(),
+      detectionTime: match[3]?.trim(),
+      evidence: [makeEvidence(block, line)],
+      description: `DHCP conflict detected for ${match[1]}`,
+      descriptionSource: "CLI",
+      descriptionConfidence: 95
     }];
   });
 }

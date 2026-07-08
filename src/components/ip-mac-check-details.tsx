@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { useAnalysisStore } from "@/store/analysis-store";
 import type { AnalysisResult, Finding, IpInventoryRecord, Severity } from "@/types/network";
-import { ipInSubnet } from "@/utils/ip";
+import { ipInSubnet, ipToNumber } from "@/utils/ip";
 
 interface IpMacCheckDetailsProps {
   row: IpInventoryRecord;
@@ -149,6 +149,8 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
   const dhcpBindings = result.dhcpBindings.filter(item => item.ip === row.ip || Boolean(item.mac && row.macs.includes(item.mac)));
   const reservationPools = result.dhcpPools.filter(pool => pool.host === row.ip || Boolean(pool.hardwareAddress && row.macs.includes(pool.hardwareAddress)));
   const networkPools = result.dhcpPools.filter(pool => pool.network && pool.prefix !== undefined && ipInSubnet(row.ip, pool.network, pool.prefix));
+  const excludedRanges = result.dhcpExcludedRanges.filter(range => ipInRange(row.ip, range.startIp, range.endIp));
+  const dhcpConflicts = result.dhcpConflicts.filter(item => item.ip === row.ip);
   const macRows = result.macTable.filter(item => row.macs.includes(item.mac));
   const interfaces = result.interfaces.filter(item => item.ip === row.ip || row.ports.includes(item.name) || arpMatches.some(arp => arp.interfaceName === item.name));
   const subnets = result.subnets.filter(subnet => ipInSubnet(row.ip, subnet.network, subnet.prefix));
@@ -203,11 +205,11 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
       "dhcp",
       language === "th" ? "ตรวจ DHCP Binding / Reservation" : "DHCP binding / reservation",
       hasDhcpCommand,
-      dhcpBindings.length + reservationPools.length,
+      dhcpBindings.length + reservationPools.length + excludedRanges.length + dhcpConflicts.length,
       language === "th"
         ? `Binding ${dhcpBindings.length} รายการ · Reservation ${reservationPools.length} รายการ · อยู่ใน Dynamic Pool ${networkPools.length} Pool`
-        : `${dhcpBindings.length} binding(s) · ${reservationPools.length} reservation(s) · member of ${networkPools.length} dynamic pool(s).`,
-      ["show ip dhcp binding", "show ip dhcp snooping binding", "show running-config"]
+        : `${dhcpBindings.length} binding(s) · ${reservationPools.length} reservation(s) · ${excludedRanges.length} excluded range(s) · ${dhcpConflicts.length} conflict(s) · member of ${networkPools.length} dynamic pool(s).`,
+      ["show ip dhcp binding", "show ip dhcp snooping binding", "show ip source binding", "show ip dhcp conflict", "show running-config"]
     ),
     commandCheck(
       "mac-table",
@@ -288,6 +290,8 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
       ...arpMatches.flatMap(item => item.evidence),
       ...dhcpBindings.flatMap(item => item.evidence),
       ...reservationPools.flatMap(item => item.evidence),
+      ...excludedRanges.flatMap(item => item.evidence),
+      ...dhcpConflicts.flatMap(item => item.evidence),
       ...macRows.flatMap(item => item.evidence),
       ...interfaces.flatMap(item => item.evidence),
       ...relatedFindings.flatMap(item => item.evidence),
@@ -308,11 +312,13 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
       relatedLogs,
       macDetails,
       networkPools,
+      excludedRanges,
+      dhcpConflicts,
       mismatchDetails
     }),
     subnets: subnets.map(item => item.cidr),
     arpSummary: arpMatches.length ? `${arpMatches.length} record(s)` : "-",
-    dhcpSummary: `${dhcpBindings.length} binding(s), ${reservationPools.length} reservation(s)`,
+    dhcpSummary: `${dhcpBindings.length} binding(s), ${reservationPools.length} reservation(s), ${excludedRanges.length} excluded, ${dhcpConflicts.length} conflict(s)`,
     interfaceSummary: interfaces.map(item => item.name).join(", ") || "-",
     relatedFindings,
     macDetails,
@@ -331,6 +337,8 @@ function buildProblemLines({
   relatedLogs,
   macDetails,
   networkPools,
+  excludedRanges,
+  dhcpConflicts,
   mismatchDetails
 }: {
   row: IpInventoryRecord;
@@ -343,13 +351,25 @@ function buildProblemLines({
   relatedLogs: AnalysisResult["logs"];
   macDetails: Array<{ mac: string; ports: string[]; arpIps: string[]; dhcpIps: string[]; findingTitles: string[]; hasWarning: boolean }>;
   networkPools: AnalysisResult["dhcpPools"];
+  excludedRanges: AnalysisResult["dhcpExcludedRanges"];
+  dhcpConflicts: AnalysisResult["dhcpConflicts"];
   mismatchDetails: Array<{ mac: string; ip: string; arpVlan?: number; macVlan?: number; arpPort?: string; macPort: string }>;
 }) {
   const lines: string[] = [];
-  if (row.status === "Unknown" && row.sources.includes("DHCP Pool range")) {
+  if (row.status === "Not Free - In DHCP Pool" || row.sources.includes("DHCP Pool range")) {
     lines.push(language === "th"
-      ? `${row.ip} อยู่ใน DHCP Pool แต่ยังไม่มี ARP/DHCP lease ยืนยัน จึงไม่ถือว่าว่าง`
+      ? `${row.ip} อยู่ใน DHCP Pool จึงไม่ถือว่าเป็น IP ว่างสำหรับนำไปใช้แบบ static แม้ยังไม่เห็น lease`
       : `${row.ip} is inside a DHCP pool but has no ARP/DHCP lease evidence, so it is not treated as free.`);
+  }
+  if (row.status === "Excluded" || excludedRanges.length) {
+    lines.push(language === "th"
+      ? `${row.ip} ถูกกันไว้ด้วย ip dhcp excluded-address: ${excludedRanges.map(item => `${item.startIp}-${item.endIp}`).join(", ") || "-"}`
+      : `${row.ip} is covered by ip dhcp excluded-address: ${excludedRanges.map(item => `${item.startIp}-${item.endIp}`).join(", ") || "-"}.`);
+  }
+  if (dhcpConflicts.length) {
+    lines.push(language === "th"
+      ? `${row.ip} มี DHCP conflict ${dhcpConflicts.length} รายการ ต้องตรวจ ARP/MAC/DHCP binding ก่อนใช้งาน`
+      : `${row.ip} has ${dhcpConflicts.length} DHCP conflict record(s). Verify ARP, MAC table, and DHCP binding before reuse.`);
   }
   if (row.status === "Unknown" && row.sources.includes("Insufficient evidence for free-IP decision")) {
     lines.push(language === "th"
@@ -411,6 +431,8 @@ function classificationReasonText(row: IpInventoryRecord, language: "en" | "th")
   if (row.status === "Used" && row.sources.includes("DHCP Binding")) return "พบ DHCP binding หรือ source-binding ของ IP นี้ จึงถือว่าใช้งานอยู่";
   if (row.status === "Reserved" && row.sources.includes("DHCP Reservation")) return "พบ DHCP reservation หรือ host pool ที่จอง IP นี้ไว้";
   if (row.status === "Reserved" && row.sources.includes("Interface IP")) return "IP นี้ถูกใช้เป็น IP ของ Interface, SVI หรือ routed interface";
+  if (row.status === "Excluded") return "IP นี้ถูกกันไว้ด้วยคำสั่ง ip dhcp excluded-address จึงห้ามนับเป็น IP ว่าง";
+  if (row.status === "Not Free - In DHCP Pool") return "IP นี้อยู่ใน dynamic DHCP pool จึงไม่ใช่ IP ว่างสำหรับใช้งานแบบ static";
   if (row.status === "Unknown" && row.sources.includes("DHCP Pool range")) return "IP อยู่ใน dynamic DHCP pool จึงห้ามสรุปว่าว่างจนกว่าจะมี lease, ARP หรือ MAC evidence เพิ่ม";
   if (row.status === "Unknown" && row.sources.includes("Insufficient evidence for free-IP decision")) return "ยังขาดหลักฐาน ARP, DHCP binding, MAC table หรือ subnet evidence จึงยังไม่ยืนยันว่า IP ว่าง";
   if (row.status === "Likely Free") return "ตรวจหลักฐานที่จำเป็นแล้วไม่พบ ARP, DHCP binding, MAC-table, reservation, interface หรือ dynamic-pool evidence ของ IP นี้";
@@ -452,6 +474,13 @@ function hasSetMismatch<T extends string | number>(a: T[], b: T[]): boolean {
   const left = new Set(a);
   const right = new Set(b);
   return [...left].some(item => !right.has(item)) || [...right].some(item => !left.has(item));
+}
+
+function ipInRange(ip: string, startIp: string, endIp: string): boolean {
+  const value = ipToNumber(ip);
+  const start = ipToNumber(startIp);
+  const end = ipToNumber(endIp);
+  return value !== null && start !== null && end !== null && value >= start && value <= end;
 }
 
 function unique<T>(items: T[]): T[] {

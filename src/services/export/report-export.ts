@@ -1,12 +1,19 @@
 import jsPDF from "jspdf";
 import type { AnalysisResult } from "@/types/network";
 import { downloadText } from "@/lib/utils";
+import { ipInSubnet, ipToNumber } from "@/utils/ip";
 
 export function exportJson(result: AnalysisResult) {
   downloadText("netscope-analysis.json", JSON.stringify(result, null, 2), "application/json;charset=utf-8");
 }
 
 export function exportMarkdown(result: AnalysisResult) {
+  const poolRows = poolReportRows(result);
+  const missingCommands = result.recommendedCommands;
+  const verifiedFree = result.freeIps.filter(row => row.confidence >= 60);
+  const configFree = result.freeIps.filter(row => row.confidence < 60);
+  const poolNotFree = result.ipInventory.filter(row => row.status === "Not Free - In DHCP Pool");
+  const anomalies = [...result.findings, ...result.blockedDevices].filter(item => item.severity !== "Info" && item.severity !== "Passed");
   const lines = [
     "# NetScope Analyzer Report",
     "",
@@ -15,8 +22,29 @@ export function exportMarkdown(result: AnalysisResult) {
     `Subnets: ${result.subnets.length}`,
     `Security Score: ${result.securityScore}/100`,
     "",
+    "## Likely Free IP - Verified",
+    ...sectionRows(verifiedFree.map(row => `- ${row.ip} (${row.confidence}%): ${row.statusReason ?? row.sources.join(", ")}`)),
+    "",
+    "## Likely Free IP - Config Candidate",
+    ...sectionRows(configFree.map(row => `- ${row.ip} (${row.confidence}%): ${row.statusReason ?? row.sources.join(", ")}`)),
+    "",
+    "## IP In DHCP Pool - Not Reusable Static Free",
+    ...sectionRows(poolNotFree.map(row => `- ${row.ip}: ${row.relatedPoolNames?.join(", ") || "DHCP pool"} (${row.confidence}%)`)),
+    "",
+    "## DHCP Pool Analysis",
+    ...sectionRows(poolRows.map(row => `- ${row.name} ${row.network}: leased=${row.leased}, poolFree=${row.poolFree}, excluded=${row.excluded}, reserved=${row.reserved}, conflict=${row.conflict}, gateway=${row.gateway || "-"}`)),
+    "",
+    "## Subnet Utilization",
+    ...sectionRows(result.subnets.map(subnet => `- ${subnet.cidr}: used=${subnet.used}, likelyFree=${subnet.free}, usable=${subnet.totalUsable}, utilization=${subnet.utilization}%`)),
+    "",
+    "## MAC/IP Anomalies",
+    ...sectionRows(anomalies.map(finding => `- **${finding.severity}** ${finding.title}${finding.target ? ` (${finding.target})` : ""}: ${finding.description}`)),
+    "",
+    "## Missing Commands",
+    ...sectionRows(missingCommands.map(command => `- ${command}`)),
+    "",
     "## Findings",
-    ...result.findings.map(finding => `- **${finding.severity}** ${finding.title}${finding.target ? ` (${finding.target})` : ""}: ${finding.description}`)
+    ...sectionRows(result.findings.map(finding => `- **${finding.severity}** ${finding.title}${finding.target ? ` (${finding.target})` : ""}: ${finding.description}`))
   ];
   downloadText("netscope-report.md", lines.join("\n"), "text/markdown;charset=utf-8");
 }
@@ -42,6 +70,7 @@ export function exportPdf(result: AnalysisResult) {
 }
 
 export function exportExcel(result: AnalysisResult) {
+  const poolRows = poolReportRows(result);
   const sheets = [
     sheetXml("Summary", [{
     generatedAt: result.generatedAt,
@@ -60,11 +89,47 @@ export function exportExcel(result: AnalysisResult) {
       sources: sources.join(", "),
       evidenceCount: evidence.length
     }))),
+    sheetXml("Free IPs", result.freeIps.map(({ evidence, macs, vlans, ports, sources, checkedSources, missingSources, relatedPoolNames, ...row }) => ({
+      ...row,
+      level: row.confidence >= 60 ? "Likely Free - Verified" : "Likely Free - Config Candidate",
+      macs: macs.join(", "),
+      vlans: vlans.join(", "),
+      ports: ports.join(", "),
+      sources: sources.join(", "),
+      checkedSources: checkedSources?.join(", ") ?? "",
+      missingSources: missingSources?.join(", ") ?? "",
+      relatedPoolNames: relatedPoolNames?.join(", ") ?? "",
+      evidenceCount: evidence.length
+    }))),
+    sheetXml("Pool Not Free", result.ipInventory.filter(row => row.status === "Not Free - In DHCP Pool").map(({ evidence, macs, vlans, ports, sources, checkedSources, missingSources, relatedPoolNames, ...row }) => ({
+      ...row,
+      macs: macs.join(", "),
+      vlans: vlans.join(", "),
+      ports: ports.join(", "),
+      sources: sources.join(", "),
+      checkedSources: checkedSources?.join(", ") ?? "",
+      missingSources: missingSources?.join(", ") ?? "",
+      relatedPoolNames: relatedPoolNames?.join(", ") ?? "",
+      evidenceCount: evidence.length
+    }))),
+    sheetXml("DHCP Pools", poolRows),
+    sheetXml("Subnet Utilization", result.subnets.map(subnet => ({
+      cidr: subnet.cidr,
+      network: subnet.network,
+      prefix: subnet.prefix,
+      firstHost: subnet.firstHost,
+      lastHost: subnet.lastHost,
+      totalUsable: subnet.totalUsable,
+      used: subnet.used,
+      likelyFree: subnet.free,
+      utilization: subnet.utilization
+    }))),
     sheetXml("Findings", result.findings.map(({ evidence, verificationCommands, ...row }) => ({
     ...row,
     evidenceCount: evidence.length,
     verificationCommands: verificationCommands.join("\n")
     }))),
+    sheetXml("Missing Commands", result.recommendedCommands.map(command => ({ command }))),
     sheetXml("Security", result.securityChecks.map(({ evidence, ...row }) => ({ ...row, evidenceCount: evidence.length })))
   ];
   const xml = `<?xml version="1.0"?>
@@ -76,6 +141,43 @@ export function exportExcel(result: AnalysisResult) {
 ${sheets.join("\n")}
 </Workbook>`;
   downloadText("netscope-analysis.xls", xml, "application/vnd.ms-excel;charset=utf-8");
+}
+
+function sectionRows(rows: string[]): string[] {
+  return rows.length ? rows : ["- None"];
+}
+
+function poolReportRows(result: AnalysisResult) {
+  return result.dhcpPools.map(pool => {
+    const inPool = (ip: string) => Boolean(pool.network && pool.prefix !== undefined && ipInSubnet(ip, pool.network, pool.prefix));
+    const excludedRanges = result.dhcpExcludedRanges.filter(range => inPool(range.startIp) || inPool(range.endIp));
+    const excluded = excludedRanges.reduce((total, range) => total + ipRangeCount(range.startIp, range.endIp), 0);
+    const reserved = result.dhcpPools.filter(item => item.host && inPool(item.host)).length;
+    const conflict = result.dhcpConflicts.filter(item => inPool(item.ip)).length;
+    const leased = pool.leased ?? result.dhcpBindings.filter(item => inPool(item.ip)).length;
+    const total = pool.total ?? 0;
+    return {
+      name: pool.name,
+      network: pool.network ? `${pool.network}/${pool.prefix ?? "?"}` : "",
+      leased,
+      total,
+      poolFree: Math.max(0, total - leased - excluded - reserved - conflict),
+      excluded,
+      reserved,
+      conflict,
+      utilization: pool.utilization ?? "",
+      gateway: pool.defaultRouters.join(", "),
+      dns: pool.dnsServers.join(", "),
+      warning: "Pool free is DHCP scope capacity only; do not treat it as reusable static free IP."
+    };
+  });
+}
+
+function ipRangeCount(startIp: string, endIp: string) {
+  const start = ipToNumber(startIp);
+  const end = ipToNumber(endIp);
+  if (start === null || end === null) return 0;
+  return Math.max(0, end - start + 1);
 }
 
 function sheetXml(name: string, rows: Array<Record<string, unknown>>): string {

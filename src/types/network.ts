@@ -146,6 +146,21 @@ export interface DhcpPoolRecord extends DescriptionMetadata {
   evidence: Evidence[];
 }
 
+export interface DhcpExcludedRangeRecord extends DescriptionMetadata {
+  startIp: string;
+  endIp: string;
+  vrf?: string;
+  evidence: Evidence[];
+}
+
+export interface DhcpConflictRecord extends DescriptionMetadata {
+  ip: string;
+  detectionMethod?: string;
+  detectionTime?: string;
+  vrf?: string;
+  evidence: Evidence[];
+}
+
 export interface InterfaceRecord extends DescriptionMetadata {
   name: string;
   status?: string;
@@ -279,7 +294,7 @@ export interface Finding extends DescriptionMetadata {
 
 export interface IpInventoryRecord extends DescriptionMetadata {
   ip: string;
-  status: "Used" | "Likely Free" | "Reserved" | "Unknown";
+  status: "Used" | "Likely Free" | "Reserved" | "Excluded" | "Not Free - In DHCP Pool" | "Unknown";
   statusReason?: string;
   confidence: number;
   macs: string[];
@@ -323,6 +338,8 @@ export interface ParsedDataset {
   macTable: MacRecord[];
   dhcpBindings: DhcpBindingRecord[];
   dhcpPools: DhcpPoolRecord[];
+  dhcpExcludedRanges: DhcpExcludedRangeRecord[];
+  dhcpConflicts: DhcpConflictRecord[];
   interfaces: InterfaceRecord[];
   vlans: VlanRecord[];
   vrfs: VrfRecord[];

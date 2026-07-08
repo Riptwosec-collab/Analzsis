@@ -1,4 +1,4 @@
-import type { CommandBlock, ConfigFeatureCategory, DhcpPoolRecord, InterfaceRecord, ParsedDataset, VrfRecord } from "@/types/network";
+import type { CommandBlock, ConfigFeatureCategory, DhcpExcludedRangeRecord, DhcpPoolRecord, InterfaceRecord, ParsedDataset, VrfRecord } from "@/types/network";
 import { makeEvidence } from "@/parsers/detector/command-detector";
 import { maskToPrefix } from "@/utils/ip";
 import { normalizeInterface } from "@/utils/interface";
@@ -190,12 +190,26 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
     }
 
     if (!hit) {
+      const excluded = text.match(/^ip dhcp excluded-address(?:\s+vrf\s+(\S+))?\s+(\d+\.\d+\.\d+\.\d+)(?:\s+(\d+\.\d+\.\d+\.\d+))?/i);
       const host = text.match(/^hostname\s+(\S+)/i);
       const ver = text.match(/^version\s+(.+)/i);
       const udi = text.match(/^license udi pid\s+(\S+)\s+sn\s+(\S+)/i);
       const route = text.match(/^ip route(?:\s+vrf\s+(\S+))?\s+(\S+)\s+(\S+)\s+(\S+)(?:\s+(\S+))?/i);
       const acl = text.match(/^access-list\s+(\S+)\s+(permit|deny|remark)\s+(.+)/i);
-      if (host) {
+      if (excluded) {
+        const record: DhcpExcludedRangeRecord = {
+          vrf: excluded[1],
+          startIp: excluded[2],
+          endIp: excluded[3] ?? excluded[2],
+          evidence: [evidence],
+          description: excluded[3] ? `DHCP excluded range ${excluded[2]}-${excluded[3]}` : `DHCP excluded address ${excluded[2]}`,
+          descriptionSource: "CLI",
+          descriptionConfidence: 100
+        };
+        dataset.dhcpExcludedRanges.push(record);
+        addFeature(dataset, "DHCP", "DHCP Excluded Address", excluded[3] ? `${excluded[2]}-${excluded[3]}` : excluded[2], excluded[1] ?? "global", evidence);
+        hit = true;
+      } else if (host) {
         hostname = host[1]; addFeature(dataset, "Identity", "Hostname", hostname, hostname, evidence); hit = true;
       } else if (ver) {
         version = ver[1].trim(); addFeature(dataset, "Identity", "Software Version", version, hostname, evidence); hit = true;

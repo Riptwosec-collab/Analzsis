@@ -323,6 +323,8 @@ function buildSubnetModel(subnet: SubnetRecord, result: AnalysisResult, language
   const bindings = result.dhcpBindings.filter(row => ipInSubnet(row.ip, subnet.network, subnet.prefix));
   const dynamicPools = result.dhcpPools.filter(pool => pool.poolType !== "Reservation" && !pool.host && pool.network && pool.prefix !== undefined && rangesOverlap(subnet.network, subnet.prefix, pool.network, pool.prefix));
   const reservations = result.dhcpPools.filter(pool => pool.host && ipInSubnet(pool.host, subnet.network, subnet.prefix));
+  const excludedRanges = result.dhcpExcludedRanges.filter(range => ipInSubnet(range.startIp, subnet.network, subnet.prefix) || ipInSubnet(range.endIp, subnet.network, subnet.prefix));
+  const dhcpConflicts = result.dhcpConflicts.filter(row => ipInSubnet(row.ip, subnet.network, subnet.prefix));
   const interfaces = result.interfaces.filter(row => row.ip && ipInSubnet(row.ip, subnet.network, subnet.prefix));
   const gatewayIps = unique([
     ...dynamicPools.flatMap(pool => pool.defaultRouters),
@@ -385,8 +387,10 @@ function buildSubnetModel(subnet: SubnetRecord, result: AnalysisResult, language
     check("interface", language === "th" ? "ตรวจ Interface / SVI / Gateway" : "Interface, SVI, and gateway", interfaces.length ? "found" : commandState(result, ["show ip interface brief", "show interfaces", "show running-config"]), interfaces.length ? `พบ ${interfaces.length} Interface ที่มี IP อยู่ใน Subnet` : "ไม่พบ Interface IP ใน Subnet จากข้อมูลที่มี", interfaces.map(item => `${item.name}: ${item.ip}/${item.prefix ?? "?"}${item.description ? ` · ${item.description}` : ""}`), ["show ip interface brief", "show running-config"], interfaces.flatMap(item => item.evidence)),
     check("gateway", language === "th" ? "ตรวจ Default Gateway / Virtual Gateway" : "Default and virtual gateway", gatewayIps.length ? "found" : commandState(result, ["show standby brief", "show vrrp brief", "show ip interface brief", "show running-config"]), gatewayIps.length ? `พบ Gateway ที่สัมพันธ์ ${gatewayIps.length} IP` : "ยังยืนยัน Gateway ไม่ได้", gatewayIps, ["DHCP default-router", "SVI/routed interface", "HSRP/VRRP"], [...dynamicPools.flatMap(pool => pool.evidence), ...interfaces.flatMap(item => item.evidence)]),
     check("dhcp-pool", language === "th" ? "ตรวจ DHCP Dynamic Pool" : "DHCP dynamic pool", dynamicPools.length ? "found" : commandState(result, ["show ip dhcp pool", "show running-config"]), dynamicPools.length ? `พบ ${dynamicPools.length} Pool ที่ทับหรือครอบคลุม Subnet` : "ไม่พบ Dynamic Pool ที่สัมพันธ์", dynamicPools.map(pool => `${pool.name}: ${pool.network}/${pool.prefix ?? "?"} · Gateway ${pool.defaultRouters.join(", ") || "-"}`), ["show ip dhcp pool", "show running-config"], dynamicPools.flatMap(pool => pool.evidence)),
+    check("excluded", language === "th" ? "ตรวจ DHCP Excluded Address" : "DHCP excluded addresses", excludedRanges.length ? "found" : commandState(result, ["show running-config"]), excludedRanges.length ? `พบ excluded-address ${excludedRanges.length} ช่วง` : "ไม่พบ excluded-address ใน Subnet", excludedRanges.map(range => `${range.startIp}${range.endIp !== range.startIp ? ` - ${range.endIp}` : ""}`), ["show running-config"], excludedRanges.flatMap(range => range.evidence)),
     check("reservations", language === "th" ? "ตรวจ DHCP Reservation / Static Binding" : "DHCP reservations and static bindings", reservations.length ? "found" : commandState(result, ["show ip dhcp binding", "show ip dhcp snooping binding", "show running-config"]), reservations.length ? `พบ ${reservations.length} Reservation` : "ไม่พบ Reservation ใน Subnet", reservations.map(pool => `${pool.host} · ${pool.clientIdentifier ?? pool.hardwareAddress ?? "No identifier"}`), ["show ip dhcp binding", "show running-config"], reservations.flatMap(pool => pool.evidence)),
     check("bindings", language === "th" ? "ตรวจ DHCP Lease / Binding" : "DHCP leases and bindings", bindings.length ? "found" : commandState(result, ["show ip dhcp binding", "show ip dhcp snooping binding", "show ip source binding"]), bindings.length ? `พบ ${bindings.length} Binding` : "ไม่พบ Binding ใน Subnet", bindings.map(item => `${item.ip} · ${item.mac ?? item.clientIdentifier ?? "No MAC"} · ${item.state ?? item.type ?? "-"}`), ["show ip dhcp binding", "show ip dhcp snooping binding", "show ip source binding"], bindings.flatMap(item => item.evidence)),
+    check("dhcp-conflict", language === "th" ? "ตรวจ DHCP Conflict" : "DHCP conflicts", dhcpConflicts.length ? "warning" : commandState(result, ["show ip dhcp conflict"]), dhcpConflicts.length ? `พบ DHCP conflict ${dhcpConflicts.length} IP` : "ไม่พบ DHCP conflict ใน Subnet", dhcpConflicts.map(item => `${item.ip} · ${item.detectionMethod ?? "-"} · ${item.detectionTime ?? "-"}`), ["show ip dhcp conflict"], dhcpConflicts.flatMap(item => item.evidence)),
     check("arp", language === "th" ? "ตรวจ ARP" : "ARP records", arp.length ? "found" : commandState(result, ["show ip arp", "show arp"]), arp.length ? `พบ ${arp.length} ARP Record` : "ไม่พบ ARP ใน Subnet", arp.map(item => `${item.ip} · ${item.mac ?? "Incomplete"} · ${item.interfaceName ?? "-"}`), ["show ip arp", "show arp"], arp.flatMap(item => item.evidence)),
     check("mac", language === "th" ? "ตรวจ MAC Table / VLAN / Port" : "MAC table, VLAN, and port", macRows.length ? "found" : commandState(result, ["show mac address-table"]), macRows.length ? `พบ ${macRows.length} MAC Table Record ที่สัมพันธ์` : "ไม่พบ MAC Table ที่สัมพันธ์", macRows.map(item => `${item.mac} · VLAN ${item.vlan ?? "-"} · ${item.port} · ${item.type}`), ["show mac address-table"], macRows.flatMap(item => item.evidence)),
     check("dhcp-no-arp", language === "th" ? "DHCP Binding แต่ไม่พบ ARP" : "DHCP binding without ARP", dhcpNoArp.length ? "warning" : bindings.length || arp.length ? "passed" : "missing", dhcpNoArp.length ? `พบ ${dhcpNoArp.length} IP ที่มี Binding แต่ไม่มี ARP` : "ไม่พบความผิดปกติชนิดนี้จากหลักฐานปัจจุบัน", dhcpNoArp.map(item => `${item.ip} · ${item.mac ?? item.clientIdentifier ?? "-"}`), ["DHCP binding", "ARP"], dhcpNoArp.flatMap(item => item.evidence)),
@@ -420,7 +424,9 @@ function buildSubnetModel(subnet: SubnetRecord, result: AnalysisResult, language
     ...arp.flatMap(item => item.evidence),
     ...bindings.flatMap(item => item.evidence),
     ...dynamicPools.flatMap(item => item.evidence),
+    ...excludedRanges.flatMap(item => item.evidence),
     ...reservations.flatMap(item => item.evidence),
+    ...dhcpConflicts.flatMap(item => item.evidence),
     ...interfaces.flatMap(item => item.evidence),
     ...macRows.flatMap(item => item.evidence),
     ...routes.flatMap(item => item.evidence),
@@ -431,7 +437,7 @@ function buildSubnetModel(subnet: SubnetRecord, result: AnalysisResult, language
 
   const freeCandidates = inventory.filter(row => row.status === "Likely Free");
 
-  return { inventory, freeCandidates, arp, bindings, relatedMacs, interfaces, findings, logs, checks, commandStatuses, unknownCommands, evidenceLines };
+  return { inventory, freeCandidates, arp, bindings, relatedMacs, interfaces, findings, logs, checks, commandStatuses, unknownCommands, evidenceLines, excludedRanges, dhcpConflicts };
 }
 
 function check(id: string, title: string, state: CheckState, summary: string, details: string[], sources: string[], evidence: Evidence[]): CheckItem {
