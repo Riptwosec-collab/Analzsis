@@ -3,6 +3,7 @@ import { correlate } from "@/correlation/ip-correlation";
 import { findConfigurationFindings } from "@/correlation/config-findings";
 import { detectCommandBlocks } from "@/parsers/detector/command-detector";
 import { emptyDataset, parseBlock } from "@/parsers/cisco-ios/parser";
+import { parsePingSweep } from "@/parsers/generic/ping-sweep-parser";
 
 export function parseCli(input: string): ParsedDataset {
   const lineCount = input ? input.replace(/\r\n/g, "\n").split("\n").length : 0;
@@ -25,6 +26,7 @@ export function parseCli(input: string): ParsedDataset {
     verificationCommands: block.recommendedFollowUpCommands?.length ? block.recommendedFollowUpCommands : ["show ip arp", "show mac address-table", "show ip dhcp binding"]
   }));
   dataset.parserWarnings = [...unsupported, ...findConfigurationFindings(dataset)];
+  dataset.pingResults = parsePingSweep(input);
 
   return dataset;
 }

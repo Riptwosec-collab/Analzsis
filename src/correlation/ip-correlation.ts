@@ -237,6 +237,26 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
     });
   }
 
+  // Ping / reachability evidence (read-only; results are pasted, never sent).
+  // A reply is strong "Used" proof. A no-reply is intentionally weak and only
+  // raises Free confidence when ARP/DHCP/MAC evidence is also absent.
+  const pingNoReply = new Set<string>();
+  for (const ping of dataset.pingResults) {
+    if (ping.reachable) {
+      touch(ping.ip, {
+        status: "Used",
+        statusReason: "Host replied to a pasted ping/reachability scan.",
+        confidence: 88,
+        macs: ping.mac ? [ping.mac] : [],
+        sources: [`Ping Reply${ping.rttMs !== undefined ? ` (${ping.rttMs} ms)` : ""}`],
+        checkedSources: [...checkedSources, "Ping Sweep"],
+        evidence: ping.evidence
+      });
+    } else {
+      pingNoReply.add(ping.ip);
+    }
+  }
+
   const arpIps = new Set(dataset.arp.map(record => record.ip));
   for (const subnet of subnets) {
     if (subnet.prefix < 20 || subnet.prefix > 30) continue;
@@ -272,16 +292,26 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
           continue;
         }
         const hasFullEvidence = hasEnoughEvidenceToCallFree(dataset, commandSet, subnet);
+        const noReply = pingNoReply.has(ip);
+        const freeConfidence = hasFullEvidence ? (noReply ? 88 : 60) : (noReply ? 70 : 35);
         touch(ip, {
           status: "Likely Free",
           statusReason: hasFullEvidence
-            ? "No ARP, DHCP binding, MAC-table, reservation, interface, or dynamic-pool evidence was found after required checks."
-            : "Config-derived subnet gap outside DHCP pools, reservations, and interface IPs. Treat as a likely free candidate that still needs ARP, DHCP binding, and MAC-table verification.",
-          confidence: hasFullEvidence ? 60 : 35,
-          sources: hasFullEvidence ? ["Subnet gap", "No ARP/DHCP/MAC evidence"] : ["Subnet gap", "Config-only candidate", "Outside DHCP Pool"],
-          checkedSources,
-          missingSources: hasFullEvidence ? [] : missingSources,
-          evidence: []
+            ? (noReply
+              ? "No ARP, DHCP binding, MAC-table, reservation, interface, or dynamic-pool evidence, and the IP did not answer a pasted ping scan. High-confidence free candidate that still needs a final verification before assignment."
+              : "No ARP, DHCP binding, MAC-table, reservation, interface, or dynamic-pool evidence was found after required checks.")
+            : (noReply
+              ? "No ARP/DHCP/MAC evidence and no ping reply, but ARP/DHCP/MAC coverage is incomplete. Medium-confidence free candidate."
+              : "Config-derived subnet gap outside DHCP pools, reservations, and interface IPs. Treat as a likely free candidate that still needs ARP, DHCP binding, and MAC-table verification."),
+          confidence: freeConfidence,
+          sources: [
+            "Subnet gap",
+            ...(hasFullEvidence ? ["No ARP/DHCP/MAC evidence"] : ["Config-only candidate", "Outside DHCP Pool"]),
+            ...(noReply ? ["Ping: no reply"] : [])
+          ],
+          checkedSources: noReply ? [...checkedSources, "Ping Sweep"] : checkedSources,
+          missingSources: hasFullEvidence ? (noReply ? [] : ["Ping Sweep (recommended)"]) : missingSources,
+          evidence: dataset.pingResults.find(record => record.ip === ip)?.evidence ?? []
         });
       }
     }

@@ -329,6 +329,15 @@ export interface SecurityCheck extends DescriptionMetadata {
   recommendation: string;
 }
 
+export interface PingRecord extends DescriptionMetadata {
+  ip: string;
+  reachable: boolean;
+  rttMs?: number;
+  mac?: string | null;
+  source: string;
+  evidence: Evidence[];
+}
+
 export interface ParsedDataset {
   sourceLineCount: number;
   devices: DeviceRecord[];
@@ -348,6 +357,7 @@ export interface ParsedDataset {
   configFeatures: ConfigFeatureRecord[];
   parserCoverage: ParserCoverage;
   logs: LogRecord[];
+  pingResults: PingRecord[];
   topology: TopologyLink[];
 }
 

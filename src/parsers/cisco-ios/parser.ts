@@ -46,6 +46,7 @@ export function emptyDataset(lineCount: number): ParsedDataset {
       coveragePercent: 0
     },
     logs: [],
+    pingResults: [],
     topology: []
   };
 }
