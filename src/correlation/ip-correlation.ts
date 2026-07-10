@@ -310,7 +310,7 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
             ...(noReply ? ["Ping: no reply"] : [])
           ],
           checkedSources: noReply ? [...checkedSources, "Ping Sweep"] : checkedSources,
-          missingSources: hasFullEvidence ? (noReply ? [] : ["Ping Sweep (recommended)"]) : missingSources,
+          missingSources: hasFullEvidence ? [] : missingSources,
           evidence: dataset.pingResults.find(record => record.ip === ip)?.evidence ?? []
         });
       }
