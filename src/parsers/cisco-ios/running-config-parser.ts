@@ -278,7 +278,27 @@ function isIgnored(text: string): boolean {
 }
 
 function addFeature(dataset: ParsedDataset, category: ConfigFeatureCategory, feature: string, value: string, scope: string, evidence: ReturnType<typeof makeEvidence>): void {
-  dataset.configFeatures.push({ category, feature, value, scope, status: "Configured", description: `${feature} configuration detected.`, descriptionSource: "Generated", descriptionConfidence: 90, descriptionEvidence: [evidence], evidence: [evidence] });
+  dataset.configFeatures.push({ category, feature, value, scope, status: "Configured", description: featureDescription(feature), descriptionSource: "Generated", descriptionConfidence: 90, descriptionEvidence: [evidence], evidence: [evidence] });
+}
+
+function featureDescription(feature: string): string {
+  const descriptions: Record<string, string> = {
+    "AAA": "Authentication, authorization, and accounting settings were detected. Review the configured TACACS+/RADIUS path and local fallback policy.",
+    "DHCP Snooping": "DHCP Snooping is configured. Inspect its enabled VLANs and trusted uplink ports before relying on binding evidence.",
+    "Dynamic ARP Inspection": "Dynamic ARP Inspection is configured. Validate that the protected VLANs and trusted ports match the intended Layer 2 design.",
+    "Spanning Tree": "Spanning Tree settings were detected. Confirm root placement, PortFast use, and any blocked or inconsistent ports with operational output.",
+    "SNMP": "SNMP management settings were detected. Sensitive credentials are masked; review version, access restrictions, trap hosts, and read/write exposure.",
+    "Logging": "Syslog configuration was detected. Verify the source interface, destination reachability, and retention policy.",
+    "NTP": "Time synchronization configuration was detected. Verify source interface, VRF, preferred server, and synchronization state.",
+    "VRF": "A VRF definition was detected. IP, route, and DHCP evidence must be correlated only within this VRF.",
+    "NAT": "NAT configuration was detected. Review inside/outside roles, overload rules, and the associated access list before troubleshooting address translation.",
+    "Flow and Performance Monitoring": "Flow or performance monitoring is configured. Verify exporter reachability, monitor attachment, and collector policy.",
+    "OMP": "SD-WAN OMP configuration was detected. Review transport, control-plane, and route exchange state with read-only operational commands.",
+    "First-Hop Redundancy": "First-hop redundancy configuration was detected. Validate active/standby or master/backup state and virtual gateway addresses.",
+    "Access List": "An access-list entry was detected. Review its order, direction, and effective interface attachment before concluding traffic is permitted or denied.",
+    "Static Route": "A static route was detected. Verify the next hop, VRF, outgoing interface, and route availability with operational routing output."
+  };
+  return descriptions[feature] ?? `${feature} configuration was detected from the imported CLI.`;
 }
 
 function classify(text: string): [ConfigFeatureCategory, string, boolean?] | null {

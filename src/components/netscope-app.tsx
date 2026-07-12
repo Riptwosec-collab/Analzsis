@@ -513,6 +513,8 @@ function ViewRouter({
   switch (view) {
     case "overview":
       return <Overview result={result} t={t} />;
+    case "configuration":
+      return <Configuration result={result} t={t} language={language} />;
     case "ip-inventory":
       return <IpTable title={t.tabs["ip-inventory"]} rows={filterInventory(result.ipInventory, query)} query={query} setQuery={setQuery} t={t} />;
     case "free-ip":
@@ -1080,12 +1082,19 @@ function Vlans({ result, t }: { result: AnalysisResult; t: Copy }) {
 }
 
 function Findings({ title, findings, t, language }: { title: string; findings: Finding[]; t: Copy; language: Language }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = findings.find(finding => finding.id === selectedId);
   return (
     <Card>
       <CardHeader><CardTitle>{title}</CardTitle><CardDescription>{findings.length} {t.panels.findings}</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         {findings.length ? findings.map(finding => (
-          <div key={finding.id} className="cyber-finding rounded-lg border p-4">
+          <button
+            key={finding.id}
+            type="button"
+            onClick={() => setSelectedId(finding.id)}
+            className="cyber-finding w-full rounded-lg border p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+          >
             <div className="flex flex-wrap items-center gap-2">
               <Badge severity={finding.severity}>{translateSeverity(finding.severity, t)}</Badge>
               <div className="font-medium">{translateFindingTitle(finding.title, language)}</div>
@@ -1093,14 +1102,131 @@ function Findings({ title, findings, t, language }: { title: string; findings: F
               <div className="ms-auto text-xs text-muted-foreground">{t.table.confidence} {finding.confidence}%</div>
             </div>
             <p className="mt-2 text-sm text-muted-foreground">{localizeFindingDescription(finding, language)}</p>
-            <p className="mt-2 text-sm">{localizeRecommendation(finding, language)}</p>
-            <div className="mt-3 grid gap-2 lg:grid-cols-2">
-              <pre className="overflow-auto rounded-md bg-muted p-3 text-xs">{finding.verificationCommands.join("\n")}</pre>
-              <pre className="overflow-auto rounded-md bg-muted p-3 text-xs">{finding.evidence.slice(0, 4).map(e => `${e.device}:${e.line} ${e.text}`).join("\n") || t.states.noEvidence}</pre>
-            </div>
-          </div>
+          </button>
         )) : <EmptyPanel text={t.states.noFindings} />}
       </CardContent>
+      <AuditModal
+        open={Boolean(selected)}
+        onClose={() => setSelectedId(null)}
+        title={selected ? translateFindingTitle(selected.title, language) : ""}
+        subtitle={selected ? `${selected.target ?? t.states.noEvidence} · ${t.table.confidence} ${selected.confidence}%` : ""}
+      >
+        {selected ? (
+          <div className="space-y-4 text-sm">
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="flex flex-wrap items-center gap-2"><Badge severity={selected.severity}>{translateSeverity(selected.severity, t)}</Badge><span className="font-mono text-xs text-muted-foreground">{selected.target ?? "-"}</span></div>
+              <p className="mt-3 leading-6 text-muted-foreground">{localizeFindingDescription(selected, language)}</p>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{t.table.recommendation}</div>
+              <p className="mt-2 leading-6">{localizeRecommendation(selected, language)}</p>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">Verification commands</div>
+              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.verificationCommands.join("\n") || "-"}</pre>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{t.table.evidence}</div>
+              <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.evidence.map(e => `${e.device}:${e.line} [${e.command}] ${e.text}`).join("\n") || t.states.noEvidence}</pre>
+            </div>
+            <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75">
+              <span className="font-medium text-cyan-50">Sources checked:</span>{" "}{[...new Set(selected.evidence.map(e => e.command))].join(", ") || "-"}
+            </div>
+          </div>
+        ) : null}
+      </AuditModal>
+    </Card>
+  );
+}
+
+function Configuration({ result, t, language }: { result: AnalysisResult; t: Copy; language: Language }) {
+  const features = useMemo(() => {
+    const grouped = new Map<string, {
+      key: string;
+      category: string;
+      feature: string;
+      description?: string;
+      values: string[];
+      evidence: AnalysisResult["configFeatures"][number]["evidence"];
+    }>();
+    for (const item of result.configFeatures) {
+      const key = `${item.category}|${item.feature}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.values.push(item.value ?? "-");
+        existing.evidence.push(...item.evidence);
+        continue;
+      }
+      grouped.set(key, {
+        key,
+        category: item.category,
+        feature: item.feature,
+        description: item.description,
+        values: [item.value ?? "-"],
+        evidence: [...item.evidence]
+      });
+    }
+    return [...grouped.values()].sort((left, right) => left.category.localeCompare(right.category) || left.feature.localeCompare(right.feature));
+  }, [result.configFeatures]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selected = features.find(feature => feature.key === selectedKey);
+  const byCategory = features.reduce<Record<string, typeof features>>((groups, feature) => {
+    (groups[feature.category] ??= []).push(feature);
+    return groups;
+  }, {});
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t.tabs.configuration}</CardTitle>
+        <CardDescription>{language === "th" ? "หัวข้อ Config ที่ตรวจพบจาก CLI รอบปัจจุบัน เลือกหัวข้อเพื่อดูคำอธิบายและหลักฐานเฉพาะที่เกี่ยวข้อง" : "Configuration features found in the current CLI. Select a feature to inspect its explanation and only its related evidence."}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {features.length ? Object.entries(byCategory).map(([category, categoryFeatures]) => (
+          <section key={category} aria-label={category}>
+            <h2 className="mb-2 text-sm font-semibold text-cyan-100">{category}</h2>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {categoryFeatures.map(feature => (
+                <button
+                  key={feature.key}
+                  type="button"
+                  onClick={() => setSelectedKey(feature.key)}
+                  className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3 text-left hover:bg-cyan-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+                >
+                  <div className="flex items-start justify-between gap-2"><span className="text-sm font-medium">{localizeConfigFeature(feature.feature, language)}</span><Badge severity="Info">{feature.evidence.length}</Badge></div>
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{localizeConfigDescription(feature.description, language)}</p>
+                </button>
+              ))}
+            </div>
+          </section>
+        )) : <EmptyPanel text={t.states.noEvidence} />}
+      </CardContent>
+      <AuditModal
+        open={Boolean(selected)}
+        onClose={() => setSelectedKey(null)}
+        title={selected ? localizeConfigFeature(selected.feature, language) : ""}
+        subtitle={selected?.category}
+      >
+        {selected ? (
+          <div className="space-y-4 text-sm">
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{language === "th" ? "คำอธิบาย" : "Description"}</div>
+              <p className="mt-2 leading-6 text-muted-foreground">{localizeConfigDescription(selected.description, language)}</p>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{language === "th" ? "ค่าที่ตรวจพบ" : "Detected values"}</div>
+              <ul className="mt-2 space-y-1 text-xs leading-5 text-cyan-50/80">
+                {[...new Set(selected.values)].map(value => <li key={value}>- {value}</li>)}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{t.table.evidence}</div>
+              <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.evidence.map(item => `${item.device}:${item.line} [${item.command}] ${item.text}`).join("\n") || t.states.noEvidence}</pre>
+            </div>
+            <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.table.sources}:</span>{" "}{[...new Set(selected.evidence.map(item => item.command))].join(", ") || "-"}</div>
+          </div>
+        ) : null}
+      </AuditModal>
     </Card>
   );
 }
@@ -1675,6 +1801,48 @@ function localizeRecommendation(finding: Finding, language: Language) {
     return "เพิ่ม Parser สำหรับคำสั่งนี้ หรือเก็บคำสั่งมาตรฐานที่ระบบรองรับเพื่อให้วิเคราะห์ได้ละเอียดขึ้น";
   }
   return translateFindingDescription(finding.recommendation, language);
+}
+
+function localizeConfigFeature(feature: string, language: Language): string {
+  if (language === "en") return feature;
+  const labels: Record<string, string> = {
+    "AAA": "AAA / การยืนยันตัวตน",
+    "DHCP Snooping": "DHCP Snooping",
+    "Dynamic ARP Inspection": "Dynamic ARP Inspection",
+    "Spanning Tree": "Spanning Tree",
+    "SNMP": "SNMP",
+    "Logging": "Syslog / Logging",
+    "NTP": "NTP / เวลาเครือข่าย",
+    "VRF": "VRF",
+    "NAT": "NAT",
+    "Flow and Performance Monitoring": "NetFlow / การติดตามประสิทธิภาพ",
+    "OMP": "SD-WAN OMP",
+    "First-Hop Redundancy": "Gateway Redundancy",
+    "Access List": "Access List",
+    "Static Route": "Static Route"
+  };
+  return labels[feature] ?? feature;
+}
+
+function localizeConfigDescription(description: string | undefined, language: Language): string {
+  if (!description || language === "en") return description ?? "-";
+  const descriptions: Record<string, string> = {
+    "Authentication, authorization, and accounting settings were detected. Review the configured TACACS+/RADIUS path and local fallback policy.": "ตรวจพบการตั้งค่า Authentication, Authorization และ Accounting ควรตรวจเส้นทาง TACACS+/RADIUS และนโยบาย fallback แบบ local.",
+    "DHCP Snooping is configured. Inspect its enabled VLANs and trusted uplink ports before relying on binding evidence.": "ตั้งค่า DHCP Snooping แล้ว ควรตรวจ VLAN ที่เปิดใช้และ uplink ที่เชื่อถือได้ก่อนใช้ binding เป็นหลักฐาน.",
+    "Dynamic ARP Inspection is configured. Validate that the protected VLANs and trusted ports match the intended Layer 2 design.": "ตั้งค่า Dynamic ARP Inspection แล้ว ควรตรวจว่า VLAN ที่ป้องกันและพอร์ต trusted ตรงกับแบบ Layer 2 ที่ตั้งใจไว้.",
+    "Spanning Tree settings were detected. Confirm root placement, PortFast use, and any blocked or inconsistent ports with operational output.": "ตรวจพบการตั้งค่า Spanning Tree ควรยืนยันตำแหน่ง root, การใช้ PortFast และพอร์ต blocked/inconsistent ด้วยข้อมูล operational.",
+    "SNMP management settings were detected. Sensitive credentials are masked; review version, access restrictions, trap hosts, and read/write exposure.": "ตรวจพบการตั้งค่า SNMP โดยค่าลับถูกปิดบัง ควรตรวจเวอร์ชัน ข้อจำกัดการเข้าถึง trap host และสิทธิ์ read/write.",
+    "Syslog configuration was detected. Verify the source interface, destination reachability, and retention policy.": "ตรวจพบการตั้งค่า Syslog ควรตรวจ source interface การเข้าถึงปลายทาง และนโยบายเก็บรักษา log.",
+    "Time synchronization configuration was detected. Verify source interface, VRF, preferred server, and synchronization state.": "ตรวจพบการตั้งค่าเวลา ควรตรวจ source interface, VRF, preferred server และสถานะการ sync.",
+    "A VRF definition was detected. IP, route, and DHCP evidence must be correlated only within this VRF.": "ตรวจพบ VRF ต้องเชื่อมโยงหลักฐาน IP, route และ DHCP ภายใน VRF เดียวกันเท่านั้น.",
+    "NAT configuration was detected. Review inside/outside roles, overload rules, and the associated access list before troubleshooting address translation.": "ตรวจพบ NAT ควรตรวจบทบาท inside/outside, กฎ overload และ access list ที่เกี่ยวข้องก่อนวิเคราะห์การแปลงที่อยู่.",
+    "Flow or performance monitoring is configured. Verify exporter reachability, monitor attachment, and collector policy.": "ตั้งค่า Flow หรือ monitoring แล้ว ควรตรวจการเข้าถึง exporter, จุดที่ผูก monitor และนโยบาย collector.",
+    "SD-WAN OMP configuration was detected. Review transport, control-plane, and route exchange state with read-only operational commands.": "ตรวจพบ SD-WAN OMP ควรตรวจ transport, control-plane และการแลก route ด้วยคำสั่งตรวจสอบแบบ read-only.",
+    "First-hop redundancy configuration was detected. Validate active/standby or master/backup state and virtual gateway addresses.": "ตรวจพบ gateway redundancy ควรยืนยันสถานะ active/standby หรือ master/backup และ virtual gateway address.",
+    "An access-list entry was detected. Review its order, direction, and effective interface attachment before concluding traffic is permitted or denied.": "ตรวจพบ access-list ควรตรวจลำดับ ทิศทาง และ interface ที่นำไปใช้จริง ก่อนสรุปว่า traffic ถูกอนุญาตหรือปฏิเสธ.",
+    "A static route was detected. Verify the next hop, VRF, outgoing interface, and route availability with operational routing output.": "ตรวจพบ static route ควรตรวจ next hop, VRF, outgoing interface และการใช้งาน route ด้วยข้อมูล routing operational."
+  };
+  return descriptions[description] ?? "ตรวจพบการตั้งค่าใน CLI ที่นำเข้า เลือกดูหลักฐานเพื่อยืนยันขอบเขตและผลกระทบ.";
 }
 
 function localizedTelegramSummary(result: AnalysisResult, t: Copy) {

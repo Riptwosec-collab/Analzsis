@@ -56,9 +56,6 @@ export function IpMacCheckDetails({ row, language }: IpMacCheckDetailsProps) {
               <Badge severity={badgeSeverity(check.state)}>{stateLabel(check.state, language)}</Badge>
             </div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">{check.detail}</p>
-            <div className="mt-2 text-[11px] text-cyan-100/70">
-              {language === "th" ? "แหล่งตรวจ:" : "Checked from:"} {check.sources.join(", ") || "-"}
-            </div>
           </article>
         ))}
       </div>
@@ -73,10 +70,6 @@ export function IpMacCheckDetails({ row, language }: IpMacCheckDetailsProps) {
             <dd>{row.descriptionSource ?? "Unknown"}{row.descriptionConfidence !== undefined ? ` · ${row.descriptionConfidence}%` : ""}</dd>
             <dt className="text-muted-foreground">{language === "th" ? "เหตุผลการจัดประเภท" : "Classification reason"}</dt>
             <dd>{classificationReasonText(row, language)}</dd>
-            <dt className="text-muted-foreground">{language === "th" ? "หลักฐานที่ตรวจแล้ว" : "Checked sources"}</dt>
-            <dd>{row.checkedSources?.join(", ") || "-"}</dd>
-            <dt className="text-muted-foreground">{language === "th" ? "หลักฐานที่ยังขาด" : "Missing sources"}</dt>
-            <dd>{row.missingSources?.join(", ") || "-"}</dd>
             <dt className="text-muted-foreground">{language === "th" ? "DHCP Pool ที่เกี่ยวข้อง" : "Related DHCP pools"}</dt>
             <dd>{row.relatedPoolNames?.join(", ") || "-"}</dd>
             <dt className="text-muted-foreground">Subnet</dt>
@@ -140,6 +133,14 @@ export function IpMacCheckDetails({ row, language }: IpMacCheckDetailsProps) {
         <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-[11px] leading-5 text-cyan-50/80">
           {model.evidenceLines.join("\n") || (language === "th" ? "ไม่มีบรรทัดหลักฐานโดยตรง" : "No direct evidence lines")}
         </pre>
+      </div>
+
+      <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75">
+        <span className="font-medium text-cyan-50">{language === "th" ? "แหล่งตรวจ:" : "Sources checked:"}</span>{" "}
+        {model.sources.join(", ") || "-"}
+        {row.missingSources?.length ? (
+          <span className="text-muted-foreground"> {language === "th" ? `· หลักฐานที่ยังขาด: ${row.missingSources.join(", ")}` : `· Missing evidence: ${row.missingSources.join(", ")}`}</span>
+        ) : null}
       </div>
     </section>
   );
@@ -333,7 +334,11 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
     interfaceSummary: interfaces.map(item => item.name).join(", ") || "-",
     relatedFindings,
     macDetails,
-    evidenceLines
+    evidenceLines,
+    sources: unique([
+      ...row.checkedSources ?? [],
+      ...checks.flatMap(check => check.sources)
+    ])
   };
 }
 

@@ -146,6 +146,25 @@ Group  Port-channel  Protocol    Ports
 1      Po1(SU)       LACP        Gi1/0/1(P) Gi1/0/2(P)
 `;
 
+const CONFIG_FEATURES_FRAGMENT = `EDGE-RT01#show running-config
+version 17.15
+hostname EDGE-RT01
+aaa new-model
+ip dhcp snooping vlan 10,20
+spanning-tree mode pvst
+logging host 10.1.1.211 vrf CORP
+snmp-server enable traps snmp authentication linkdown linkup
+ntp server vrf CORP 10.1.1.171 prefer
+vrf definition CORP
+ address-family ipv4
+ exit-address-family
+flow exporter SITE-COLLECTOR
+router omp
+ip nat inside source list NAT-ACL interface GigabitEthernet0/0/0 overload
+fhrp version vrrp v3
+ip access-list extended USERS-IN
+`;
+
 describe("network utilities", () => {
   it("normalizes MAC and DHCP client identifier formats", () => {
     expect(normalizeMac("6c3b.e524.91f8")).toBe("6c:3b:e5:24:91:f8");
@@ -207,6 +226,17 @@ describe("parser", () => {
     expect(lan?.vrf).toBe("CORP");
     expect(parsed.staticRoutes.length).toBe(2);
     expect(parsed.configFeatures.some(item => item.category === "SD-WAN" && item.feature === "OMP")).toBe(true);
+  });
+
+  it("classifies operational switch and router configuration features with useful descriptions", () => {
+    const parsed = parseCli(CONFIG_FEATURES_FRAGMENT);
+    const features = new Map(parsed.configFeatures.map(item => [item.feature, item]));
+
+    for (const feature of ["AAA", "DHCP Snooping", "Spanning Tree", "Logging", "SNMP", "NTP", "VRF", "Flow and Performance Monitoring", "OMP", "NAT", "First-Hop Redundancy"]) {
+      expect(features.has(feature)).toBe(true);
+    }
+    expect(features.get("DHCP Snooping")?.description).toContain("trusted uplink ports");
+    expect(features.get("NAT")?.description).toContain("inside/outside roles");
   });
 
   it("parses config fragments and detects duplicate reservations, incomplete pools, and gateway mismatch", () => {
