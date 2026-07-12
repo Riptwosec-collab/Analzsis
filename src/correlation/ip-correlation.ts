@@ -18,6 +18,7 @@ export function correlate(dataset: ParsedDataset): AnalysisResult {
     ...dataset.parserWarnings,
     ...findDuplicateIpFindings(ipInventory),
     ...findMacFlapping(dataset),
+    ...findInterfaceCounterFindings(dataset),
     ...findDhcpPoolIssues(dataset),
     ...findDhcpConflicts(dataset),
     ...findLogFindings(dataset)
@@ -521,6 +522,31 @@ function findMacFlapping(dataset: ParsedDataset): Finding[] {
     verificationCommands: log.mac ? [`show mac address-table address ${log.mac}`, "show spanning-tree inconsistentports"] : ["show logging | include MACFLAP"]
   }));
   return [...findings, ...logFindings];
+}
+
+function findInterfaceCounterFindings(dataset: ParsedDataset): Finding[] {
+  return dataset.interfaces.flatMap((record, index): Finding[] => {
+    const counters = {
+      input: record.inputErrors ?? 0,
+      crc: record.crcErrors ?? 0,
+      output: record.outputErrors ?? 0,
+      drops: record.outputDrops ?? 0
+    };
+    if (!Object.values(counters).some(value => value > 0)) return [];
+    const detail = Object.entries(counters).filter(([, value]) => value > 0).map(([name, value]) => `${name}=${value}`).join(", ");
+    return [{
+      id: `interface-counters-${index}`,
+      severity: counters.crc > 0 || counters.input > 0 ? "High" : "Medium",
+      category: "Interface",
+      title: "Interface error counters detected",
+      target: record.name,
+      description: `${record.name} reports non-zero interface counters: ${detail}.`,
+      confidence: 90,
+      evidence: record.evidence,
+      recommendation: "Check cabling, optics, speed/duplex, queue pressure, and counter trend before remediation.",
+      verificationCommands: [`show interfaces ${record.name}`, `show interfaces counters errors | include ${record.name}`, "show logging"]
+    }];
+  });
 }
 
 function findDhcpPoolIssues(dataset: ParsedDataset): Finding[] {

@@ -118,12 +118,8 @@ export function parseBlock(block: CommandBlock, dataset: ParsedDataset): Command
       return parsed(block, dataset, "cisco-ios-operational", ["show ip dhcp binding", "show ip arp"]);
     case "show ip dhcp snooping":
     case "show ip arp inspection":
-    case "show interfaces counters errors":
     case "show interfaces":
-    case "show spanning-tree":
-    case "show spanning-tree detail":
     case "show spanning-tree inconsistentports":
-    case "show etherchannel summary":
     case "show port-security":
     case "show port-security interface":
     case "show authentication sessions":
@@ -136,6 +132,16 @@ export function parseBlock(block: CommandBlock, dataset: ParsedDataset): Command
     case "show errdisable recovery":
       parseOperationalEvidence(block, dataset);
       return parsed(block, dataset, "cisco-ios-operational");
+    case "show interfaces counters errors":
+      dataset.interfaces.push(...parseInterfaceCountersErrors(block));
+      return parsed(block, dataset, "cisco-ios-operational", ["show interfaces", "show logging"]);
+    case "show spanning-tree":
+    case "show spanning-tree detail":
+      dataset.interfaces.push(...parseSpanningTree(block));
+      return parsed(block, dataset, "cisco-ios-operational", ["show spanning-tree inconsistentports", "show interfaces status"]);
+    case "show etherchannel summary":
+      dataset.interfaces.push(...parseEtherChannelSummary(block));
+      return parsed(block, dataset, "cisco-ios-operational", ["show interfaces trunk", "show interfaces status"]);
     default:
       return withParseMetadata(block, block.lines.length ? "unsupported" : "empty", 0, recommendedForUnsupported(block.rawCommand), [
         "No structured parser is available yet; raw lines are kept as operational evidence."
@@ -590,6 +596,73 @@ function parseAccessLists(block: CommandBlock): AccessListRecord[] {
     const rule = text.match(/^(?:(\d+)\s+)?(permit|deny|remark)\s+(.+)$/i);
     if (!rule) continue;
     records.push({ name, family: "ipv4", aclType: type, sequence: rule[1] ? Number(rule[1]) : undefined, action: rule[2].toLowerCase() as "permit" | "deny" | "remark", expression: rule[3].trim(), evidence: [makeEvidence(block, line)], description: rule[2].toLowerCase() === "remark" ? rule[3].trim() : undefined, descriptionSource: rule[2].toLowerCase() === "remark" ? "CLI" : "Unknown", descriptionConfidence: rule[2].toLowerCase() === "remark" ? 100 : 0 });
+  }
+  return records;
+}
+
+function parseInterfaceCountersErrors(block: CommandBlock): InterfaceRecord[] {
+  return block.lines.flatMap(line => {
+    const text = line.text.trim();
+    if (/^(Port|Interface|----|\*|Total)/i.test(text)) return [];
+    const fields = text.split(/\s+/);
+    const name = normalizeInterface(fields[0]);
+    const numbers = fields.slice(1).filter(value => /^\d+$/.test(value)).map(Number);
+    if (!name || numbers.length < 4) return [];
+    return [{
+      name,
+      crcErrors: numbers[1],
+      outputErrors: numbers[2],
+      inputErrors: numbers[3],
+      outputDrops: numbers.at(-1),
+      evidence: [makeEvidence(block, line)],
+      description: "Interface error counters from operational output.",
+      descriptionSource: "Generated",
+      descriptionConfidence: 90
+    }];
+  });
+}
+
+function parseSpanningTree(block: CommandBlock): InterfaceRecord[] {
+  return block.lines.flatMap(line => {
+    const text = line.text.trim();
+    if (/^(Interface|Port|---|VLAN|\*|This bridge)/i.test(text)) return [];
+    const match = text.match(/^(\S+)\s+(Root|Desg|Altn|Back|Mstr)\s+(FWD|BLK|LRN|LISTEN|DIS|BKN|INCONSISTENT)\b/i);
+    const name = normalizeInterface(match?.[1]);
+    if (!match || !name) return [];
+    return [{
+      name,
+      stpRole: match[2],
+      stpState: match[3].toUpperCase(),
+      evidence: [makeEvidence(block, line)],
+      description: `Spanning-tree ${match[2]} / ${match[3].toUpperCase()}.`,
+      descriptionSource: "Generated",
+      descriptionConfidence: 95
+    }];
+  });
+}
+
+function parseEtherChannelSummary(block: CommandBlock): InterfaceRecord[] {
+  const records: InterfaceRecord[] = [];
+  for (const line of block.lines) {
+    const text = line.text.trim();
+    if (/^(Group|Number of|Flags|---)/i.test(text)) continue;
+    const match = text.match(/^(\d+)\s+(Po\d+)\(([^)]+)\)\s+(\S+)\s+(.+)$/i);
+    if (!match) continue;
+    const members = [...match[5].matchAll(/([A-Za-z][A-Za-z0-9/.-]*)\(([^)]+)\)/g)];
+    for (const member of members) {
+      const name = normalizeInterface(member[1]);
+      if (!name) continue;
+      records.push({
+        name,
+        channelGroup: match[1],
+        channelMode: match[4],
+        etherChannelState: `${match[3]}/${member[2]}`,
+        evidence: [makeEvidence(block, line)],
+        description: `EtherChannel ${match[2]} member state ${member[2]}.`,
+        descriptionSource: "Generated",
+        descriptionConfidence: 95
+      });
+    }
   }
   return records;
 }

@@ -224,6 +224,13 @@ export interface InterfaceRecord extends DescriptionMetadata {
   servicePolicies?: string[];
   loadInterval?: number;
   helperAddresses?: string[];
+  stpRole?: string;
+  stpState?: string;
+  etherChannelState?: string;
+  inputErrors?: number;
+  crcErrors?: number;
+  outputErrors?: number;
+  outputDrops?: number;
   evidence: Evidence[];
 }
 

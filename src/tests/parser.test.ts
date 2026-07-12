@@ -134,6 +134,18 @@ interface Vlan60
  ip helper-address 10.60.253.202
 `;
 
+const LAYER2_OPERATIONAL_FRAGMENT = `CORE-SW01#show interfaces counters errors
+Port        Align-Err    FCS-Err   Xmit-Err    Rcv-Err  UnderSize OutDiscards
+Gi1/0/2             0          3          0          1          0           8
+CORE-SW01#show spanning-tree
+Interface           Role Sts Cost      Prio.Nbr Type
+Gi1/0/1             Desg FWD 4         128.1    P2p
+Gi1/0/2             Altn BLK 4         128.2    P2p
+CORE-SW01#show etherchannel summary
+Group  Port-channel  Protocol    Ports
+1      Po1(SU)       LACP        Gi1/0/1(P) Gi1/0/2(P)
+`;
+
 describe("network utilities", () => {
   it("normalizes MAC and DHCP client identifier formats", () => {
     expect(normalizeMac("6c3b.e524.91f8")).toBe("6c:3b:e5:24:91:f8");
@@ -220,6 +232,18 @@ describe("parser", () => {
     expect(svi?.helperAddresses).toEqual(["10.60.253.201", "10.60.253.202"]);
     expect(result.findings.some(item => item.title === "Dynamic DHCP pools overlap")).toBe(true);
     expect(result.findings.some(item => item.title === "DHCP reservation is inside a dynamic pool")).toBe(true);
+  });
+
+  it("parses Layer 2 operational counters, STP state, and EtherChannel members", () => {
+    const result = analyzeCli(LAYER2_OPERATIONAL_FRAGMENT);
+    const counters = result.interfaces.find(item => item.name === "Gi1/0/2" && item.crcErrors !== undefined);
+    const blocked = result.interfaces.find(item => item.name === "Gi1/0/2" && item.stpState !== undefined);
+    const member = result.interfaces.find(item => item.name === "Gi1/0/1" && item.etherChannelState !== undefined);
+
+    expect(counters).toMatchObject({ crcErrors: 3, inputErrors: 1, outputDrops: 8 });
+    expect(blocked).toMatchObject({ stpRole: "Altn", stpState: "BLK" });
+    expect(member).toMatchObject({ channelGroup: "1", channelMode: "LACP", etherChannelState: "SU/P" });
+    expect(result.findings.some(item => item.title === "Interface error counters detected" && item.target === "Gi1/0/2")).toBe(true);
   });
 
   it("normalizes common command abbreviations and records coverage", () => {
