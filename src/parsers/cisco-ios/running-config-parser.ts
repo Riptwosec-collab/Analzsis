@@ -79,13 +79,13 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
 
     if (poolStart) {
       finishPool(); finishInterface(); finishVrf();
-      currentPool = { name: poolStart[1].trim(), defaultRouters: [], dnsServers: [], evidence: [evidence] };
+      currentPool = { name: poolStart[1].trim(), defaultRouters: [], dnsServers: [], options: [], evidence: [evidence] };
       addFeature(dataset, "DHCP", "DHCP Pool", poolStart[1].trim(), poolStart[1].trim(), evidence);
       hit = true;
     } else if (interfaceStart) {
       finishPool(); finishInterface(); finishVrf();
       const name = normalizeInterface(interfaceStart[1]) ?? interfaceStart[1].trim();
-      currentInterface = { name, vlan: parseVlanId(name), mode: /^(Vlan|Loopback|Tunnel)/i.test(name) ? "routed" : "unknown", shutdown: false, servicePolicies: [], evidence: [evidence] };
+      currentInterface = { name, vlan: parseVlanId(name), mode: /^(Vlan|Loopback|Tunnel)/i.test(name) ? "routed" : "unknown", shutdown: false, servicePolicies: [], helperAddresses: [], evidence: [evidence] };
       addFeature(dataset, "Interface", "Interface", name, name, evidence);
       hit = true;
     } else if (vrfStart) {
@@ -103,6 +103,9 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
       const hardware = text.match(/^hardware-address\s+(\S+)/i);
       const router = text.match(/^default-router\s+(.+)/i);
       const dns = text.match(/^dns-server\s+(.+)/i);
+      const domain = text.match(/^domain-name\s+(.+)/i);
+      const lease = text.match(/^lease\s+(.+)/i);
+      const option = text.match(/^option\s+(\d+)\s+(?:(ascii|hex|ip)\s+)?(.+)/i);
       if (network) {
         currentPool.network = network[1]; currentPool.prefix = prefix(network[2]); currentPool.evidence.push(evidence); hit = true;
       } else if (host) {
@@ -115,6 +118,12 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
         currentPool.defaultRouters.push(...router[1].split(/\s+/)); currentPool.evidence.push(evidence); hit = true;
       } else if (dns) {
         currentPool.dnsServers.push(...dns[1].split(/\s+/)); currentPool.evidence.push(evidence); hit = true;
+      } else if (domain) {
+        currentPool.domainName = domain[1].trim(); currentPool.evidence.push(evidence); hit = true;
+      } else if (lease) {
+        currentPool.lease = lease[1].trim(); currentPool.leaseSeconds = leaseToSeconds(lease[1]); currentPool.evidence.push(evidence); hit = true;
+      } else if (option) {
+        currentPool.options = [...(currentPool.options ?? []), { code: Number(option[1]), format: option[2]?.toLowerCase(), value: option[3].trim() }]; currentPool.evidence.push(evidence); hit = true;
       } else if (/^update arp$/i.test(text)) {
         currentPool.updateArp = true; currentPool.evidence.push(evidence); hit = true;
       }
@@ -131,6 +140,7 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
       const mode = text.match(/^switchport mode\s+(access|trunk)/i);
       const channel = text.match(/^channel-group\s+(\d+)\s+mode\s+(\S+)/i);
       const policy = text.match(/^service-policy\s+(input|output)\s+(.+)/i);
+      const helper = text.match(/^ip helper-address\s+(\d+\.\d+\.\d+\.\d+)/i);
       if (description) {
         currentInterface.description = description[1].trim(); currentInterface.evidence.push(evidence); hit = true;
       } else if (vrf) {
@@ -170,6 +180,8 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
         currentInterface.natRole = "inside"; currentInterface.evidence.push(evidence); hit = true;
       } else if (policy) {
         currentInterface.servicePolicies = [...(currentInterface.servicePolicies ?? []), `${policy[1]}:${policy[2].trim()}`]; currentInterface.evidence.push(evidence); hit = true;
+      } else if (helper) {
+        currentInterface.helperAddresses = [...(currentInterface.helperAddresses ?? []), helper[1]]; currentInterface.evidence.push(evidence); hit = true;
       } else if (/^tunnel mode sdwan$/i.test(text)) {
         currentInterface.evidence.push(evidence); sdwan = true; hit = true;
       } else if (/^(no ip redirects|ip mtu|mtu|arp timeout|load-interval|negotiation|endpoint-tracker|tunnel source|ipv6|no ipv6|switchport|spanning-tree|storm-control)\b/i.test(text)) {
@@ -246,11 +258,19 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
 
   const role = sdwan ? "SD-WAN Router" : switching && routing ? "Layer 3 Switch" : switching ? "Switch" : routing ? "Router" : "Network Device";
   dataset.devices.push({ hostname, vendor: "cisco", os: sdwan || version?.startsWith("17") ? "Cisco IOS XE" : "Cisco IOS", version, model, serialNumber, role, description: `${role}${model ? ` ${model}` : ""}${version ? ` running ${version}` : ""}`, descriptionSource: "Generated", descriptionConfidence: model || version ? 92 : 75, commands: ["show running-config"] });
-  dataset.parserCoverage = { totalMeaningfulLines: meaningful, recognizedLines: recognized, ignoredLines: ignored, unrecognizedLines: Math.max(0, meaningful - recognized), coveragePercent: meaningful ? Math.round((recognized / meaningful) * 100) : 100 };
+  dataset.parserCoverage = { totalMeaningfulLines: meaningful, recognizedLines: recognized, ignoredLines: ignored, unrecognizedLines: Math.max(0, meaningful - recognized), malformedLines: 0, coveragePercent: meaningful ? Math.round((recognized / meaningful) * 100) : 100 };
 }
 
 function prefix(value: string): number | undefined {
   return value.startsWith("/") ? Number(value.slice(1)) : maskToPrefix(value) ?? undefined;
+}
+
+function leaseToSeconds(value: string): number | undefined {
+  const parts = value.trim().split(/\s+/).map(Number);
+  if (!parts.length || parts.some(part => !Number.isInteger(part) || part < 0)) return undefined;
+  if (parts.length === 1) return parts[0] * 86400;
+  const [days, hours = 0, minutes = 0] = parts;
+  return days * 86400 + hours * 3600 + minutes * 60;
 }
 
 function isIgnored(text: string): boolean {

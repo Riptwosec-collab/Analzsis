@@ -1,4 +1,4 @@
-import type { AnalysisResult, DeviceRecord, Finding, ParsedDataset, SecurityCheck } from "@/types/network";
+import type { AnalysisResult, CommandBlock, DeviceRecord, Finding, ParsedDataset, ParserCoverage, SecurityCheck } from "@/types/network";
 import { correlate } from "@/correlation/ip-correlation";
 import { findConfigurationFindings } from "@/correlation/config-findings";
 import { detectCommandBlocks } from "@/parsers/detector/command-detector";
@@ -12,6 +12,7 @@ export function parseCli(input: string): ParsedDataset {
   const parsedBlocks = blocks.map(block => parseBlock(block, dataset));
 
   dataset.commandBlocks = parsedBlocks;
+  dataset.parserCoverage = summarizeParserCoverage(parsedBlocks);
   dataset.devices = collectDevices(parsedBlocks, dataset.devices);
   const unsupported = parsedBlocks.filter(block => !block.parsed).map((block, index): Finding => ({
     id: `parser-${index}`,
@@ -25,10 +26,40 @@ export function parseCli(input: string): ParsedDataset {
     recommendation: block.missingEvidence?.join(" ") || "Add a parser module or paste a supported command for this device.",
     verificationCommands: block.recommendedFollowUpCommands?.length ? block.recommendedFollowUpCommands : ["show ip arp", "show mac address-table", "show ip dhcp binding"]
   }));
-  dataset.parserWarnings = [...unsupported, ...findConfigurationFindings(dataset)];
+  const partial = parsedBlocks
+    .filter(block => block.parseStatus === "partially-parsed" || block.parseStatus === "malformed" || block.parseStatus === "ambiguous-format")
+    .map((block, index): Finding => ({
+      id: `parser-partial-${index}`,
+      severity: "Low",
+      category: "Parser",
+      title: "Parser coverage incomplete",
+      target: block.rawCommand,
+      description: `${block.rawCommand} recognized ${block.recognizedLines ?? 0} of ${block.totalLines ?? 0} meaningful lines. Unrecognized lines are retained as raw evidence and are excluded from high-confidence correlation.`,
+      confidence: 100,
+      evidence: block.lines.filter(line => block.unrecognizedLineNumbers?.includes(line.line)).slice(0, 5),
+      recommendation: "Review the unrecognized lines and import the recommended read-only command output to improve evidence coverage.",
+      verificationCommands: block.recommendedFollowUpCommands?.length ? block.recommendedFollowUpCommands : ["show running-config", "show interfaces status"]
+    }));
+  dataset.parserWarnings = [...unsupported, ...partial, ...findConfigurationFindings(dataset)];
   dataset.pingResults = parsePingSweep(input);
 
   return dataset;
+}
+
+function summarizeParserCoverage(blocks: CommandBlock[]): ParserCoverage {
+  const totalMeaningfulLines = blocks.reduce((total, block) => total + (block.totalLines ?? 0), 0);
+  const recognizedLines = blocks.reduce((total, block) => total + (block.recognizedLines ?? 0), 0);
+  const ignoredLines = blocks.reduce((total, block) => total + (block.ignoredLines ?? 0), 0);
+  const unrecognizedLines = blocks.reduce((total, block) => total + (block.unrecognizedLines ?? 0), 0);
+  const malformedLines = blocks.reduce((total, block) => total + (block.malformedLines ?? 0), 0);
+  return {
+    totalMeaningfulLines,
+    recognizedLines,
+    ignoredLines,
+    unrecognizedLines,
+    malformedLines,
+    coveragePercent: totalMeaningfulLines ? Math.round((recognizedLines / totalMeaningfulLines) * 100) : 0
+  };
 }
 
 export function analyzeCli(input: string): AnalysisResult {

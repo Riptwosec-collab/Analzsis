@@ -1,4 +1,5 @@
 import type { Finding, ParsedDataset } from "@/types/network";
+import { scopeFromEvidence, scopeKey } from "@/evidence/evidence-scope";
 import { ipInSubnet } from "@/utils/ip";
 
 export function findConfigurationFindings(dataset: ParsedDataset): Finding[] {
@@ -7,6 +8,8 @@ export function findConfigurationFindings(dataset: ParsedDataset): Finding[] {
     ...findDuplicateDhcpIdentifiers(dataset),
     ...findDuplicateDhcpHosts(dataset),
     ...findDhcpGatewayMismatches(dataset),
+    ...findOverlappingDynamicDhcpPools(dataset),
+    ...findReservationsInsideDynamicPools(dataset),
     ...findParserCoverageIssue(dataset)
   ];
 }
@@ -35,13 +38,15 @@ function findDuplicateDhcpIdentifiers(dataset: ParsedDataset): Finding[] {
   for (const pool of dataset.dhcpPools) {
     const identifier = pool.clientIdentifier ?? pool.hardwareAddress;
     if (!identifier) continue;
-    const list = map.get(identifier) ?? [];
+    const key = `${scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf }))}|${identifier}`;
+    const list = map.get(key) ?? [];
     list.push(pool);
-    map.set(identifier, list);
+    map.set(key, list);
   }
 
-  return [...map.entries()].flatMap(([identifier, pools], index): Finding[] => {
+  return [...map.entries()].flatMap(([key, pools], index): Finding[] => {
     if (pools.length < 2) return [];
+    const identifier = pools[0].clientIdentifier ?? pools[0].hardwareAddress ?? key;
     const targets = pools.map(pool => pool.host ?? pool.network ?? pool.name);
     return [{
       id: `dhcp-duplicate-client-${index}`,
@@ -66,13 +71,15 @@ function findDuplicateDhcpHosts(dataset: ParsedDataset): Finding[] {
   const map = new Map<string, typeof dataset.dhcpPools>();
   for (const pool of dataset.dhcpPools) {
     if (!pool.host) continue;
-    const list = map.get(pool.host) ?? [];
+    const key = `${scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf }))}|${pool.host}`;
+    const list = map.get(key) ?? [];
     list.push(pool);
-    map.set(pool.host, list);
+    map.set(key, list);
   }
 
-  return [...map.entries()].flatMap(([host, pools], index): Finding[] => {
+  return [...map.entries()].flatMap(([key, pools], index): Finding[] => {
     if (pools.length < 2) return [];
+    const host = pools[0].host ?? key;
     return [{
       id: `dhcp-duplicate-host-${index}`,
       severity: "Critical",
@@ -85,6 +92,64 @@ function findDuplicateDhcpHosts(dataset: ParsedDataset): Finding[] {
       recommendation: "Keep one authoritative reservation and remove or correct duplicate pool definitions after validating the endpoint owner.",
       verificationCommands: [`show running-config | include ${host}`, "show ip dhcp binding", `show ip arp ${host}`]
     }];
+  });
+}
+
+function findOverlappingDynamicDhcpPools(dataset: ParsedDataset): Finding[] {
+  const pools = dataset.dhcpPools.filter(pool => pool.poolType === "Dynamic" && pool.network && pool.prefix !== undefined);
+  const findings: Finding[] = [];
+  for (let leftIndex = 0; leftIndex < pools.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < pools.length; rightIndex += 1) {
+      const left = pools[leftIndex];
+      const right = pools[rightIndex];
+      if (!left.network || left.prefix === undefined || !right.network || right.prefix === undefined) continue;
+      if (scopeKey(scopeFromEvidence(left.evidence, { vrf: left.vrf })) !== scopeKey(scopeFromEvidence(right.evidence, { vrf: right.vrf }))) continue;
+      if (!ipInSubnet(left.network, right.network, right.prefix) && !ipInSubnet(right.network, left.network, left.prefix)) continue;
+      findings.push({
+        id: `dhcp-overlap-${leftIndex}-${rightIndex}`,
+        severity: "Critical",
+        category: "DHCP",
+        title: "Dynamic DHCP pools overlap",
+        target: `${left.name} / ${right.name}`,
+        description: `${left.name} (${left.network}/${left.prefix}) and ${right.name} (${right.network}/${right.prefix}) overlap in the same device and VRF scope.`,
+        confidence: 100,
+        evidence: [...left.evidence, ...right.evidence],
+        recommendation: "Confirm the intended address boundaries and keep non-overlapping dynamic scopes before changing either DHCP pool.",
+        verificationCommands: ["show running-config | section ^ip dhcp pool", "show ip dhcp pool", "show ip dhcp binding"]
+      });
+    }
+  }
+  return findings;
+}
+
+function findReservationsInsideDynamicPools(dataset: ParsedDataset): Finding[] {
+  const dynamicPools = dataset.dhcpPools.filter(pool => pool.poolType === "Dynamic" && pool.network && pool.prefix !== undefined);
+  const grouped = new Map<string, { pool: typeof dynamicPools[number]; reservations: typeof dataset.dhcpPools }>();
+  for (const reservation of dataset.dhcpPools) {
+    if (reservation.poolType !== "Reservation" || !reservation.host) continue;
+    const scope = scopeKey(scopeFromEvidence(reservation.evidence, { vrf: reservation.vrf }));
+    const pool = dynamicPools.find(item => item.network && item.prefix !== undefined && scopeKey(scopeFromEvidence(item.evidence, { vrf: item.vrf })) === scope && ipInSubnet(reservation.host!, item.network, item.prefix));
+    if (!pool) continue;
+    const key = `${scope}|${pool.name}`;
+    const current = grouped.get(key) ?? { pool, reservations: [] };
+    current.reservations.push(reservation);
+    grouped.set(key, current);
+  }
+
+  return [...grouped.values()].map(({ pool, reservations }, index): Finding => {
+    const addresses = reservations.map(item => item.host).filter((item): item is string => Boolean(item));
+    return {
+      id: `dhcp-reservation-in-dynamic-${index}`,
+      severity: "Medium",
+      category: "DHCP",
+      title: "DHCP reservation is inside a dynamic pool",
+      target: pool.name,
+      description: `${reservations.length} reservation(s) (${addresses.slice(0, 12).join(", ")}${addresses.length > 12 ? ", ..." : ""}) fall inside dynamic pool ${pool.name} (${pool.network}/${pool.prefix}). This is a configuration review item, not a confirmed allocation collision.`,
+      confidence: 75,
+      evidence: [...pool.evidence, ...reservations.flatMap(item => item.evidence)],
+      recommendation: "Verify the platform's reservation behavior and confirm that dynamic allocation cannot assign these addresses to a different client before changing the range.",
+      verificationCommands: ["show running-config | section ^ip dhcp pool", "show ip dhcp binding", "show ip dhcp pool"]
+    };
   });
 }
 

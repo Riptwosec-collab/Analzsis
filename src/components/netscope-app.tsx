@@ -32,6 +32,7 @@ import { exportExcel, exportJson, exportMarkdown, exportPdf } from "@/services/e
 import { sanitizeCli, scanSensitiveData } from "@/services/sanitization/sanitizer";
 import { useAnalysisStore } from "@/store/analysis-store";
 import type { AnalysisResult, Finding, IpInventoryRecord, SecurityCheck, Severity } from "@/types/network";
+import { scopeFromEvidence, scopeKey } from "@/evidence/evidence-scope";
 import { ipInSubnet, ipToNumber } from "@/utils/ip";
 import { AuditModal } from "@/components/audit-modal";
 import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
@@ -893,6 +894,14 @@ function DhcpPoolDetail({ pool, stats }: { pool: AnalysisResult["dhcpPools"][num
         <PoolList title="Conflicts" rows={stats.conflictRows.map(item => `${item.ip} · ${item.detectionMethod ?? "-"} · ${item.detectionTime ?? "-"}`)} />
         <PoolList title="Gateway / DNS" rows={[`Gateway: ${pool.defaultRouters.join(", ") || "-"}`, `DNS: ${pool.dnsServers.join(", ") || "-"}`]} />
       </div>
+      <PoolList
+        title="Lease / domain / options"
+        rows={[
+          `Lease: ${pool.lease ?? "device default"}${pool.leaseSeconds !== undefined ? ` (${pool.leaseSeconds}s)` : ""}`,
+          `Domain: ${pool.domainName ?? "-"}`,
+          ...(pool.options ?? []).map(option => `Option ${option.code}${option.format ? ` ${option.format}` : ""}: ${option.value}`)
+        ]}
+      />
       <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-[11px] leading-5 text-cyan-50/80">
         {pool.evidence.map(line => `${line.device}:${line.line} [${line.command}] ${line.text}`).join("\n") || "No evidence"}
       </pre>
@@ -1228,12 +1237,14 @@ function Settings({ t }: { t: Copy }) {
 }
 
 function poolStats(result: AnalysisResult, pool: AnalysisResult["dhcpPools"][number]) {
+  const poolScope = scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf }));
+  const inScope = (evidence: AnalysisResult["dhcpPools"][number]["evidence"], vrf?: string) => scopeKey(scopeFromEvidence(evidence, { vrf })) === poolScope;
   const inPool = (ip: string) => Boolean(pool.network && pool.prefix !== undefined && ipInSubnet(ip, pool.network, pool.prefix));
-  const excludedRanges = result.dhcpExcludedRanges.filter(range => inPool(range.startIp) || inPool(range.endIp));
+  const excludedRanges = result.dhcpExcludedRanges.filter(range => inScope(range.evidence, range.vrf) && (inPool(range.startIp) || inPool(range.endIp)));
   const excluded = excludedRanges.reduce((total, range) => total + ipRangeCount(range.startIp, range.endIp), 0);
-  const reservations = result.dhcpPools.filter(item => item.host && inPool(item.host));
-  const conflictRows = result.dhcpConflicts.filter(item => inPool(item.ip));
-  const leased = pool.leased ?? result.dhcpBindings.filter(item => inPool(item.ip)).length;
+  const reservations = result.dhcpPools.filter(item => inScope(item.evidence, item.vrf) && item.host && inPool(item.host));
+  const conflictRows = result.dhcpConflicts.filter(item => inScope(item.evidence, item.vrf) && inPool(item.ip));
+  const leased = pool.leased ?? result.dhcpBindings.filter(item => inScope(item.evidence, item.vrf) && inPool(item.ip)).length;
   const total = pool.total ?? 0;
   const poolFree = Math.max(0, total - leased - excluded - reservations.length - conflictRows.length);
   return { leased, total, poolFree, excluded, reserved: reservations.length, conflicts: conflictRows.length, excludedRanges, conflictRows, reservationsRows: reservations };
@@ -1362,10 +1373,11 @@ function detailLabel(t: Copy) {
 }
 
 function commandStatusLabel(block: { parseStatus?: string; parsed: boolean; warning?: string }, t: Copy) {
-  if (block.parseStatus === "parsed") return t.states.parsed;
+  if (block.parseStatus === "fully-parsed") return t.states.parsed;
   if (block.parseStatus === "partially-parsed") return isThaiCopy(t) ? "อ่านได้บางส่วน" : "Partially Parsed";
   if (block.parseStatus === "unsupported") return isThaiCopy(t) ? "ยังไม่รองรับ Parser" : "Unsupported Parser";
   if (block.parseStatus === "malformed") return isThaiCopy(t) ? "รูปแบบข้อมูลผิดปกติ" : "Malformed";
+  if (block.parseStatus === "ambiguous-format") return isThaiCopy(t) ? "รูปแบบข้อมูลกำกวม" : "Ambiguous Format";
   if (block.parseStatus === "empty") return isThaiCopy(t) ? "ไม่มีข้อมูลในคำสั่ง" : "Empty";
   return block.parsed ? t.states.parsed : (block.warning ?? "-");
 }

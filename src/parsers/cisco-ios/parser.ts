@@ -43,6 +43,7 @@ export function emptyDataset(lineCount: number): ParsedDataset {
       recognizedLines: 0,
       ignoredLines: 0,
       unrecognizedLines: 0,
+      malformedLines: 0,
       coveragePercent: 0
     },
     logs: [],
@@ -56,65 +57,65 @@ export function parseBlock(block: CommandBlock, dataset: ParsedDataset): Command
     case "show ip arp":
     case "show arp":
       dataset.arp.push(...parseArp(block));
-      return parsed(block, "cisco-ios", ["show mac address-table", "show ip dhcp binding"]);
+      return parsed(block, dataset, "cisco-ios", ["show mac address-table", "show ip dhcp binding"]);
     case "show mac address-table":
       dataset.macTable.push(...parseMacTable(block));
-      return parsed(block, "cisco-ios", ["show ip arp", "show interfaces status"]);
+      return parsed(block, dataset, "cisco-ios", ["show ip arp", "show interfaces status"]);
     case "show ip dhcp binding":
     case "show ip dhcp snooping binding":
     case "show ip source binding":
       dataset.dhcpBindings.push(...parseDhcpBindings(block));
-      return parsed(block, "cisco-ios", ["show ip arp", "show mac address-table"]);
+      return parsed(block, dataset, "cisco-ios", ["show ip arp", "show mac address-table"]);
     case "show ip dhcp pool":
       dataset.dhcpPools.push(...parseDhcpPool(block));
-      return parsed(block, "cisco-ios", ["show running-config | section ip dhcp"]);
+      return parsed(block, dataset, "cisco-ios", ["show running-config | section ip dhcp"]);
     case "show running-config":
       parseEnhancedRunningConfig(block, dataset);
-      return parsed(block, "cisco-ios-enhanced", ["show ip dhcp pool", "show interfaces status", "show vlan brief"]);
+      return parsed(block, dataset, "cisco-ios-enhanced", ["show ip dhcp pool", "show interfaces status", "show vlan brief"]);
     case "show ip interface brief":
       dataset.interfaces.push(...parseIpInterfaceBrief(block));
-      return parsed(block, "cisco-ios", ["show running-config interface", "show interfaces status"]);
+      return parsed(block, dataset, "cisco-ios", ["show running-config interface", "show interfaces status"]);
     case "show interfaces status":
       dataset.interfaces.push(...parseInterfaceStatus(block));
-      return parsed(block, "cisco-ios", ["show interfaces switchport", "show mac address-table"]);
+      return parsed(block, dataset, "cisco-ios", ["show interfaces switchport", "show mac address-table"]);
     case "show interfaces description":
       dataset.interfaces.push(...parseInterfaceDescription(block));
-      return parsed(block);
+      return parsed(block, dataset);
     case "show interfaces switchport":
       dataset.interfaces.push(...parseSwitchport(block));
-      return parsed(block);
+      return parsed(block, dataset);
     case "show interfaces trunk":
       dataset.interfaces.push(...parseTrunk(block));
-      return parsed(block);
+      return parsed(block, dataset);
     case "show vlan brief":
       dataset.vlans.push(...parseVlanBrief(block));
-      return parsed(block);
+      return parsed(block, dataset);
     case "show logging":
       dataset.logs.push(...parseLogs(block));
-      return parsed(block);
+      return parsed(block, dataset);
     case "show cdp neighbors detail":
     case "show lldp neighbors detail":
       dataset.topology.push(...parseTopology(block));
-      return parsed(block);
+      return parsed(block, dataset);
     case "show version":
       parseVersion(block, dataset);
-      return parsed(block);
+      return parsed(block, dataset);
     case "show inventory":
       parseInventory(block, dataset);
-      return parsed(block);
+      return parsed(block, dataset);
     case "show ip route":
       parseIpRoute(block, dataset);
-      return parsed(block);
+      return parsed(block, dataset);
     case "show vrf":
       dataset.vrfs.push(...parseShowVrf(block));
-      return parsed(block);
+      return parsed(block, dataset);
     case "show access-lists":
     case "show ip access-lists":
       dataset.accessLists.push(...parseAccessLists(block));
-      return parsed(block);
+      return parsed(block, dataset);
     case "show ip dhcp conflict":
       dataset.dhcpConflicts.push(...parseDhcpConflicts(block));
-      return parsed(block, "cisco-ios-operational", ["show ip dhcp binding", "show ip arp"]);
+      return parsed(block, dataset, "cisco-ios-operational", ["show ip dhcp binding", "show ip arp"]);
     case "show ip dhcp snooping":
     case "show ip arp inspection":
     case "show interfaces counters errors":
@@ -134,7 +135,7 @@ export function parseBlock(block: CommandBlock, dataset: ParsedDataset): Command
     case "show memory statistics":
     case "show errdisable recovery":
       parseOperationalEvidence(block, dataset);
-      return parsed(block, "cisco-ios-operational");
+      return parsed(block, dataset, "cisco-ios-operational");
     default:
       return withParseMetadata(block, block.lines.length ? "unsupported" : "empty", 0, recommendedForUnsupported(block.rawCommand), [
         "No structured parser is available yet; raw lines are kept as operational evidence."
@@ -142,9 +143,14 @@ export function parseBlock(block: CommandBlock, dataset: ParsedDataset): Command
   }
 }
 
-function parsed(block: CommandBlock, parser = "cisco-ios", recommendedFollowUpCommands: string[] = []): CommandBlock {
-  const meaningfulLines = block.lines.filter(line => line.text.trim() && !/^[-!]+$/.test(line.text.trim())).length;
-  return withParseMetadata(block, block.lines.length ? "parsed" : "empty", meaningfulLines, recommendedFollowUpCommands, [], parser);
+function parsed(block: CommandBlock, dataset: ParsedDataset, parser = "cisco-ios", recommendedFollowUpCommands: string[] = []): CommandBlock {
+  const coverage = deriveCoverage(block, dataset);
+  const status = !coverage.totalLines
+    ? "empty"
+    : coverage.unrecognizedLineNumbers.length
+      ? "partially-parsed"
+      : "fully-parsed";
+  return withParseMetadata(block, status, coverage.recognizedLineNumbers.length, recommendedFollowUpCommands, [], parser, coverage);
 }
 
 function withParseMetadata(
@@ -153,24 +159,87 @@ function withParseMetadata(
   recognizedLines: number,
   recommendedFollowUpCommands: string[],
   missingEvidence: string[] = [],
-  parser = block.parser
+  parser = block.parser,
+  coverage = deriveCoverage(block)
 ): CommandBlock {
-  const totalLines = block.lines.length;
+  const totalLines = coverage.totalLines;
   const coveragePercent = totalLines ? Math.round((recognizedLines / totalLines) * 100) : 0;
   return {
     ...block,
-    parsed: parseStatus === "parsed" || parseStatus === "partially-parsed",
+    parsed: parseStatus === "fully-parsed" || parseStatus === "partially-parsed",
     parseStatus,
     parser,
     parserVersion: block.parserVersion ?? `${parser}@1`,
     totalLines,
     recognizedLines,
-    unrecognizedLines: Math.max(0, totalLines - recognizedLines),
+    ignoredLines: coverage.ignoredLineNumbers.length,
+    malformedLines: coverage.malformedLineNumbers.length,
+    unrecognizedLines: coverage.unrecognizedLineNumbers.length,
+    recognizedLineNumbers: coverage.recognizedLineNumbers,
+    ignoredLineNumbers: coverage.ignoredLineNumbers,
+    unrecognizedLineNumbers: coverage.unrecognizedLineNumbers,
+    malformedLineNumbers: coverage.malformedLineNumbers,
     coveragePercent,
     missingEvidence,
     recommendedFollowUpCommands,
     warning: parseStatus === "unsupported" ? `Unsupported command: ${block.rawCommand}` : block.warning
   };
+}
+
+interface LineCoverage {
+  totalLines: number;
+  recognizedLineNumbers: number[];
+  ignoredLineNumbers: number[];
+  unrecognizedLineNumbers: number[];
+  malformedLineNumbers: number[];
+}
+
+function deriveCoverage(block: CommandBlock, dataset?: ParsedDataset): LineCoverage {
+  const known = dataset ? collectedEvidence(dataset, block) : new Set<number>();
+  const ignoredLineNumbers: number[] = [];
+  const recognizedLineNumbers: number[] = [];
+  const unrecognizedLineNumbers: number[] = [];
+  const malformedLineNumbers: number[] = [];
+
+  for (const line of block.lines) {
+    const text = line.text.trim();
+    if (isIgnoredOutputLine(text)) {
+      ignoredLineNumbers.push(line.line);
+    } else if (known.has(line.line)) {
+      recognizedLineNumbers.push(line.line);
+    } else {
+      unrecognizedLineNumbers.push(line.line);
+    }
+  }
+  return {
+    totalLines: recognizedLineNumbers.length + unrecognizedLineNumbers.length,
+    recognizedLineNumbers,
+    ignoredLineNumbers,
+    unrecognizedLineNumbers,
+    malformedLineNumbers
+  };
+}
+
+function isIgnoredOutputLine(text: string): boolean {
+  return !text
+    || text.startsWith("!")
+    || /^[-=!_]{3,}$/.test(text)
+    || /^(?:Building|Current) configuration/i.test(text)
+    || /^(?:protocol\s+address|vlan\s+mac address|ip address\s+client-id|interface\s+ip-address|port\s+name\s+status|interface\s+status\s+protocol|port\s+mode\s+encapsulation|switchport:|ip address\s+detection method)/i.test(text)
+    || /^(?:total|number of|legend:|flags:)/i.test(text);
+}
+
+function collectedEvidence(dataset: ParsedDataset, block: CommandBlock): Set<number> {
+  const blockEnd = block.lines.at(-1)?.line ?? block.startLine;
+  const records = [
+    ...dataset.arp, ...dataset.macTable, ...dataset.dhcpBindings, ...dataset.dhcpPools,
+    ...dataset.dhcpExcludedRanges, ...dataset.dhcpConflicts, ...dataset.interfaces, ...dataset.vlans,
+    ...dataset.vrfs, ...dataset.staticRoutes, ...dataset.accessLists, ...dataset.configFeatures,
+    ...dataset.logs, ...dataset.topology
+  ];
+  return new Set(records.flatMap(record => record.evidence)
+    .filter(item => item.device === block.device && item.command === block.command && item.line >= block.startLine && item.line <= blockEnd)
+    .map(item => item.line));
 }
 
 function recommendedForUnsupported(rawCommand: string): string[] {

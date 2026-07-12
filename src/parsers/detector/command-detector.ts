@@ -73,10 +73,10 @@ function expandCommandAliases(raw: string): string {
 
 export function detectVendor(text: string): Vendor {
   if (/FortiGate|config firewall|set allowaccess|diagnose\s+/i.test(text)) return "fortigate";
-  if (/MikroTik|\/ip address|RouterOS/i.test(text)) return "mikrotik";
+  if (/Cisco|IOS|NX-OS|hostname\s+\S+|ip dhcp pool|switchport\s+mode|interface\s+(?:Vlan|GigabitEthernet|FastEthernet|TenGigabitEthernet)|router omp/i.test(text)) return "cisco";
+  if (/MikroTik|^\/ip address|RouterOS/i.test(text)) return "mikrotik";
   if (/Aruba|ProCurve|show\s+lldp\s+info/i.test(text)) return "aruba";
   if (/JUNOS|set interfaces|show ethernet-switching/i.test(text)) return "juniper";
-  if (/Cisco|IOS|NX-OS|hostname\s+\S+|ip dhcp pool|switchport\s+mode|interface\s+(?:Vlan|GigabitEthernet|FastEthernet|TenGigabitEthernet)|router omp/i.test(text)) return "cisco";
   return "generic";
 }
 
@@ -107,6 +107,8 @@ export function detectCommandBlocks(input: string): CommandBlock[] {
         parserVersion: "cisco-ios@1",
         totalLines: 0,
         recognizedLines: 0,
+        ignoredLines: 0,
+        malformedLines: 0,
         unrecognizedLines: 0,
         coveragePercent: 0,
         missingEvidence: [],
@@ -132,6 +134,8 @@ export function detectCommandBlocks(input: string): CommandBlock[] {
         parserVersion: vendor === "generic" ? "generic@1" : "auto@1",
         totalLines: 0,
         recognizedLines: 0,
+        ignoredLines: 0,
+        malformedLines: 0,
         unrecognizedLines: 0,
         coveragePercent: 0,
         missingEvidence: [],
@@ -166,14 +170,17 @@ export function detectHostname(input: string): string | null {
 
 function sniffCommand(input: string): CommandType {
   if (/Protocol\s+Address|Internet\s+\d+\.\d+\.\d+\.\d+/i.test(input)) return "show ip arp";
-  if (/Mac Address Table|Vlan\s+Mac Address|\bDYNAMIC\b|\bSTATIC\b/i.test(input)) return "show mac address-table";
+  // Check configuration signatures before broad operational-table keywords.
+  // Running configuration frequently includes words such as "static" and MAC
+  // addresses, neither of which make it a MAC address-table command.
+  if (/^\s*(?:version\s+\S+|hostname\s+\S+|ip dhcp pool\s+\S+|interface\s+\S+|vrf definition\s+\S+|router omp)\b/im.test(input)) return "show running-config";
+  if (/^(?:Mac Address Table|Vlan\s+Mac Address)\b/im.test(input)) return "show mac address-table";
   if (/IP address\s+Client-ID|Bindings from all pools/i.test(input)) return "show ip dhcp binding";
   if (/Interface\s+IP-Address\s+OK\?/i.test(input)) return "show ip interface brief";
   if (/Port\s+Name\s+Status\s+Vlan/i.test(input)) return "show interfaces status";
   if (/Interface\s+Status\s+Protocol\s+Description/i.test(input)) return "show interfaces description";
   if (/Port\s+Mode\s+Encapsulation\s+Status\s+Native vlan/i.test(input)) return "show interfaces trunk";
   if (/Switchport:\s+(?:Enabled|Disabled)/i.test(input)) return "show interfaces switchport";
-  if (/^\s*(?:version\s+\S+|hostname\s+\S+|ip dhcp pool\s+\S+|interface\s+\S+|vrf definition\s+\S+|router omp)\b/im.test(input)) return "show running-config";
   if (/%[A-Z0-9_]+-\d-/i.test(input)) return "show logging";
   return "unknown";
 }
@@ -185,6 +192,12 @@ export function makeEvidence(block: CommandBlock, line: Evidence): Evidence {
     line: line.line,
     text: line.text,
     sourceFile: line.sourceFile,
-    normalizedText: line.normalizedText ?? line.text.trim()
+    normalizedText: line.normalizedText ?? line.text.trim(),
+    scope: {
+      deviceId: block.device,
+      hostname: block.device,
+      vendor: block.vendor,
+      sourceCommand: block.command
+    }
   };
 }

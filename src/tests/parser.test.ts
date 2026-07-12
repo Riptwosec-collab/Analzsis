@@ -109,10 +109,36 @@ ip dhcp pool USERS
  dns-server 10.20.100.2
 `;
 
+const DHCP_DEEP_ANALYSIS_FRAGMENT = `version 17.3
+hostname DHCP-CORE
+ip dhcp pool USERS
+ network 10.60.0.0 255.255.255.0
+ default-router 10.60.0.1
+ dns-server 10.60.0.53
+ domain-name corp.example
+ option 148 ascii "controller=10.60.0.10"
+ lease 0 1
+!
+ip dhcp pool USERS-OVERLAP
+ network 10.60.0.128 255.255.255.128
+ default-router 10.60.0.1
+!
+ip dhcp pool PRINTER-150
+ host 10.60.0.150 255.255.255.0
+ hardware-address 0011.2233.4455
+ default-router 10.60.0.1
+!
+interface Vlan60
+ ip address 10.60.0.1 255.255.255.0
+ ip helper-address 10.60.253.201
+ ip helper-address 10.60.253.202
+`;
+
 describe("network utilities", () => {
   it("normalizes MAC and DHCP client identifier formats", () => {
     expect(normalizeMac("6c3b.e524.91f8")).toBe("6c:3b:e5:24:91:f8");
     expect(normalizeMac("016c.3be5.2491.f8")).toBe("6c:3b:e5:24:91:f8");
+    expect(normalizeMac("0100.6677.8899.aabb")).toBe("66:77:88:99:aa:bb");
   });
 
   it("calculates subnets", () => {
@@ -182,6 +208,20 @@ describe("parser", () => {
     expect(result.parserCoverage.totalMeaningfulLines).toBeGreaterThan(0);
   });
 
+  it("parses DHCP lease, domain, options, helper addresses, and scoped dynamic-pool risks", () => {
+    const result = analyzeCli(DHCP_DEEP_ANALYSIS_FRAGMENT);
+    const users = result.dhcpPools.find(item => item.name === "USERS");
+    const svi = result.interfaces.find(item => item.name === "Vlan60");
+
+    expect(users?.lease).toBe("0 1");
+    expect(users?.leaseSeconds).toBe(3600);
+    expect(users?.domainName).toBe("corp.example");
+    expect(users?.options).toEqual([{ code: 148, format: "ascii", value: '"controller=10.60.0.10"' }]);
+    expect(svi?.helperAddresses).toEqual(["10.60.253.201", "10.60.253.202"]);
+    expect(result.findings.some(item => item.title === "Dynamic DHCP pools overlap")).toBe(true);
+    expect(result.findings.some(item => item.title === "DHCP reservation is inside a dynamic pool")).toBe(true);
+  });
+
   it("normalizes common command abbreviations and records coverage", () => {
     const parsed = parseCli([
       "CORE-SW01#sh ip int br",
@@ -193,7 +233,7 @@ describe("parser", () => {
     ].join("\n"));
     expect(parsed.commandBlocks.map(block => block.command)).toContain("show ip interface brief");
     expect(parsed.commandBlocks.map(block => block.command)).toContain("show running-config");
-    expect(parsed.commandBlocks.every(block => block.parseStatus === "parsed")).toBe(true);
+    expect(parsed.commandBlocks.every(block => block.parseStatus === "fully-parsed")).toBe(true);
     expect(parsed.commandBlocks.every(block => (block.coveragePercent ?? 0) > 0)).toBe(true);
   });
 
@@ -209,6 +249,25 @@ describe("parser", () => {
     expect(block.lines.length).toBeGreaterThan(0);
     expect(block.recommendedFollowUpCommands?.length).toBeGreaterThan(0);
     expect(parsed.parserWarnings[0]?.description).toContain("Coverage");
+  });
+
+  it("detects a raw IOS running configuration before broad static or MAC keywords", () => {
+    const parsed = parseCli([
+      "! Last configuration change at 10:00:00 UTC",
+      "version 17.3",
+      "hostname CORE-C9500",
+      "ip dhcp pool USERS",
+      " network 10.77.0.0 255.255.255.0",
+      "interface Vlan77",
+      " ip address 10.77.0.1 255.255.255.0",
+      "arp 10.77.0.10 0011.2233.4455 ARPA",
+      "ip route 10.90.0.0 255.255.0.0 10.77.0.254"
+    ].join("\n"));
+
+    expect(parsed.commandBlocks[0]?.command).toBe("show running-config");
+    expect(parsed.commandBlocks[0]?.vendor).toBe("cisco");
+    expect(parsed.dhcpPools.some(item => item.name === "USERS")).toBe(true);
+    expect(parsed.interfaces.some(item => item.name === "Vlan77")).toBe(true);
   });
 });
 
@@ -320,5 +379,72 @@ describe("analysis", () => {
     expect(freeCandidate?.missingSources ?? []).toHaveLength(0);
     expect(freeCandidate?.checkedSources).toEqual(expect.arrayContaining(["ARP", "DHCP Binding", "MAC Table"]));
     expect(freeCandidate?.statusReason).toContain("No ARP");
+  });
+
+  it("keeps identical IP and MAC evidence separate across device and VRF scopes", () => {
+    const result = analyzeCli([
+      "EDGE-A#show running-config",
+      "hostname EDGE-A",
+      "vrf definition BLUE",
+      " address-family ipv4",
+      " exit-address-family",
+      "interface Vlan10",
+      " vrf forwarding BLUE",
+      " ip address 10.90.10.1 255.255.255.0",
+      "EDGE-A#show ip arp",
+      "Protocol  Address          Age (min)  Hardware Addr   Type   Interface",
+      "Internet  10.90.10.20            2   0011.2233.4455  ARPA   Vlan10",
+      "EDGE-A#show mac address-table",
+      "Vlan    Mac Address       Type        Ports",
+      "  10    0011.2233.4455    DYNAMIC     Gi1/0/5",
+      "EDGE-B#show running-config",
+      "hostname EDGE-B",
+      "interface Vlan10",
+      " ip address 10.90.10.1 255.255.255.0",
+      "EDGE-B#show ip arp",
+      "Protocol  Address          Age (min)  Hardware Addr   Type   Interface",
+      "Internet  10.90.10.20            2   0011.2233.4455  ARPA   Vlan10",
+      "EDGE-B#show mac address-table",
+      "Vlan    Mac Address       Type        Ports",
+      "  10    0011.2233.4455    DYNAMIC     Gi1/0/9"
+    ].join("\n"));
+
+    const sharedIp = result.ipInventory.filter(item => item.ip === "10.90.10.20");
+    expect(sharedIp).toHaveLength(2);
+    expect(new Set(sharedIp.map(item => item.id)).size).toBe(2);
+    expect(result.findings.some(item => item.title === "Duplicate IP suspected")).toBe(false);
+    expect(result.findings.some(item => item.title === "MAC appears on multiple ports")).toBe(false);
+    expect(result.entityGraph.nodes.filter(item => item.type === "ip" && item.label === "10.90.10.20")).toHaveLength(2);
+  });
+
+  it("reports partial parser coverage from unrecognized lines instead of treating every line as parsed", () => {
+    const parsed = parseCli([
+      "CORE-SW01#show running-config",
+      "interface Vlan70",
+      " ip address 10.70.70.1 255.255.255.0",
+      " unsupported-feature value-that-has-no-parser"
+    ].join("\n"));
+    const block = parsed.commandBlocks[0];
+
+    expect(block.parseStatus).toBe("partially-parsed");
+    expect(block.recognizedLineNumbers).toEqual(expect.arrayContaining([2, 3]));
+    expect(block.unrecognizedLineNumbers).toContain(4);
+    expect(block.coveragePercent).toBeLessThan(100);
+    expect(parsed.parserWarnings.some(item => item.title === "Parser coverage incomplete")).toBe(true);
+  });
+
+  it("explains ARP and DHCP MAC contradictions with a confidence breakdown", () => {
+    const result = analyzeCli([
+      "CORE-SW01#show ip arp",
+      "Protocol  Address          Age (min)  Hardware Addr   Type   Interface",
+      "Internet  10.99.99.20            2   0011.2233.4455  ARPA   Vlan99",
+      "CORE-SW01#show ip dhcp binding",
+      "10.99.99.20    0100.6677.8899.aabb   Infinite   Automatic"
+    ].join("\n"));
+    const row = result.ipInventory.find(item => item.ip === "10.99.99.20");
+
+    expect(row?.contradictions.some(item => item.includes("ARP and DHCP binding"))).toBe(true);
+    expect(row?.confidenceBreakdown.contradictionPenalty).toBeGreaterThan(0);
+    expect(row?.confidenceBreakdown.finalScore).toBe(row?.confidence);
   });
 });
