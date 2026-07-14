@@ -845,17 +845,6 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
         </DataTable>
         <RecordPager page={subnetPage.page} pageCount={subnetPage.pageCount} total={result.subnets.length} onPageChange={subnetPage.setPage} />
         {selected ? (
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
-            <div className="font-mono text-cyan-100">{selected.cidr}</div>
-            <div>{t.metrics.used}: {selected.used}</div>
-            <div>{t.metrics.free}: {selected.free}</div>
-            <div>{t.metrics.score}: {selected.utilization}%</div>
-            <Button type="button" size="sm" onClick={() => setDetailsOpen(true)}>
-              Open selected subnet audit
-            </Button>
-          </div>
-        ) : null}
-        {selected ? (
           <AuditModal
             open={detailsOpen}
             onClose={() => setDetailsOpen(false)}
