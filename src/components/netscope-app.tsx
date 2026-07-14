@@ -5,6 +5,8 @@ import { Background, Controls, ReactFlow, type Edge, type Node } from "@xyflow/r
 import {
   Activity,
   Calendar,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   CircuitBoard,
   ClipboardList,
@@ -524,7 +526,7 @@ function ViewRouter({
     case "devices":
       return <Devices result={result} t={t} />;
     case "vlans":
-      return <Vlans result={result} t={t} />;
+      return <Vlans result={result} t={t} language={language} />;
     case "conflicts":
       return <Findings title={t.tabs.conflicts} findings={result.findings.filter(f => f.category !== "Security")} t={t} language={language} />;
     case "security":
@@ -755,9 +757,10 @@ function MetricDrilldown({ focus, result, t, language }: { focus: MetricFocus; r
 }
 
 function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
-  const [selectedCidr, setSelectedCidr] = useState(result.subnets[0]?.cidr ?? "");
+  const [selectedId, setSelectedId] = useState(result.subnets[0]?.id ?? "");
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const selected = result.subnets.find(subnet => subnet.cidr === selectedCidr) ?? result.subnets[0];
+  const subnetPage = useRecordPage(result.subnets);
+  const selected = result.subnets.find(subnet => subnet.id === selectedId) ?? result.subnets[0];
   return (
     <Card>
       <CardHeader>
@@ -766,14 +769,14 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
       </CardHeader>
       <CardContent>
         <DataTable headers={["CIDR", "Network", "First Host", "Last Host", t.metrics.usable, t.metrics.used, t.metrics.free, "%"]}>
-          {result.subnets.map(subnet => (
+          {subnetPage.items.map(subnet => (
             <TableRow
-              key={subnet.cidr}
+              key={subnet.id}
               onClick={() => {
-                setSelectedCidr(subnet.cidr);
+                setSelectedId(subnet.id);
                 setDetailsOpen(true);
               }}
-              className={cn("cursor-pointer", selected?.cidr === subnet.cidr && "bg-cyan-400/10")}
+              className={cn("cursor-pointer", selected?.id === subnet.id && "bg-cyan-400/10")}
             >
               <TableCell className="font-mono">{subnet.cidr}</TableCell>
               <TableCell className="font-mono">{subnet.network}</TableCell>
@@ -786,6 +789,7 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
             </TableRow>
           ))}
         </DataTable>
+        <RecordPager page={subnetPage.page} pageCount={subnetPage.pageCount} total={result.subnets.length} onPageChange={subnetPage.setPage} />
         {selected ? (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
             <div className="font-mono text-cyan-100">{selected.cidr}</div>
@@ -813,9 +817,10 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
 }
 
 function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
-  const [selectedName, setSelectedName] = useState(result.dhcpPools[0]?.name ?? "");
+  const [selectedKey, setSelectedKey] = useState(result.dhcpPools[0] ? dhcpPoolKey(result.dhcpPools[0]) : "");
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const selected = result.dhcpPools.find(pool => pool.name === selectedName) ?? result.dhcpPools[0];
+  const poolPage = useRecordPage(result.dhcpPools);
+  const selected = result.dhcpPools.find(pool => dhcpPoolKey(pool) === selectedKey) ?? result.dhcpPools[0];
   const selectedStats = selected ? poolStats(result, selected) : null;
   return (
     <Card>
@@ -825,14 +830,14 @@ function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
       </CardHeader>
       <CardContent>
         <DataTable headers={["Pool", "Network", "Leased", "Pool free", "Excluded", "Reserved", "Conflict", "%", "Gateway"]}>
-          {result.dhcpPools.map(pool => (
+          {poolPage.items.map(pool => (
             <TableRow
-              key={pool.name}
+              key={dhcpPoolKey(pool)}
               onClick={() => {
-                setSelectedName(pool.name);
+                setSelectedKey(dhcpPoolKey(pool));
                 setDetailsOpen(true);
               }}
-              className={cn("cursor-pointer", selected?.name === pool.name && "bg-cyan-400/10")}
+              className={cn("cursor-pointer", selected && dhcpPoolKey(selected) === dhcpPoolKey(pool) && "bg-cyan-400/10")}
             >
               {(() => {
                 const stats = poolStats(result, pool);
@@ -853,6 +858,7 @@ function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
             </TableRow>
           ))}
         </DataTable>
+        <RecordPager page={poolPage.page} pageCount={poolPage.pageCount} total={result.dhcpPools.length} onPageChange={poolPage.setPage} />
         {selected && selectedStats ? (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
             <div className="font-mono text-cyan-100">{selected.name}</div>
@@ -911,7 +917,7 @@ function DhcpPoolDetail({ pool, stats }: { pool: AnalysisResult["dhcpPools"][num
   );
 }
 
-function DetailMetric({ label, value }: { label: string; value: number }) {
+function DetailMetric({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-lg border border-cyan-400/15 bg-black/20 p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
@@ -942,9 +948,10 @@ function IpTable({
   setQuery: (query: string) => void;
   t: Copy;
 }) {
-  const [selectedIp, setSelectedIp] = useState(rows[0]?.ip ?? "");
+  const [selectedId, setSelectedId] = useState(rows[0]?.id ?? "");
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const selected = rows.find(row => row.ip === selectedIp) ?? rows[0];
+  const ipPage = useRecordPage(rows);
+  const selected = rows.find(row => row.id === selectedId) ?? rows[0];
   return (
     <Card>
       <CardHeader>
@@ -959,14 +966,14 @@ function IpTable({
           className="mb-3 h-10 w-full rounded-lg border px-3 text-sm"
         />
         <DataTable headers={[t.table.ip, t.table.status, t.table.confidence, t.table.mac, t.table.vlan, t.table.ports, t.table.sources]}>
-          {rows.map(row => (
+          {ipPage.items.map(row => (
             <TableRow
-              key={row.ip}
+              key={row.id}
               onClick={() => {
-                setSelectedIp(row.ip);
+                setSelectedId(row.id);
                 setDetailsOpen(true);
               }}
-              className={cn("cursor-pointer", selected?.ip === row.ip && "bg-cyan-400/10")}
+              className={cn("cursor-pointer", selected?.id === row.id && "bg-cyan-400/10")}
             >
               <TableCell className="font-mono">{row.ip}</TableCell>
               <TableCell><Badge severity={ipStatusSeverity(row.status)}>{translateIpStatus(row.status, t)}</Badge></TableCell>
@@ -978,6 +985,7 @@ function IpTable({
             </TableRow>
           ))}
         </DataTable>
+        <RecordPager page={ipPage.page} pageCount={ipPage.pageCount} total={rows.length} onPageChange={ipPage.setPage} />
         {selected ? (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
             <div className="font-mono text-cyan-100">{selected.ip}</div>
@@ -1040,18 +1048,23 @@ function Devices({ result, t }: { result: AnalysisResult; t: Copy }) {
   );
 }
 
-function Vlans({ result, t }: { result: AnalysisResult; t: Copy }) {
+function Vlans({ result, t, language }: { result: AnalysisResult; t: Copy; language: Language }) {
   const [selectedKey, setSelectedKey] = useState(result.interfaces[0] ? interfaceKey(result.interfaces[0]) : "");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const interfacePage = useRecordPage(result.interfaces);
   const selected = result.interfaces.find(row => interfaceKey(row) === selectedKey) ?? result.interfaces[0];
   return (
     <Card>
       <CardHeader><CardTitle>{t.tabs.vlans}</CardTitle><CardDescription>{t.panels.vlans}</CardDescription></CardHeader>
       <CardContent>
         <DataTable headers={[t.table.interface, t.table.status, t.table.vlan, t.table.mode, t.table.ip]}>
-          {result.interfaces.map(row => (
+          {interfacePage.items.map(row => (
             <TableRow
               key={interfaceKey(row)}
-              onClick={() => setSelectedKey(interfaceKey(row))}
+              onClick={() => {
+                setSelectedKey(interfaceKey(row));
+                setDetailsOpen(true);
+              }}
               className={cn("cursor-pointer", selected && interfaceKey(selected) === interfaceKey(row) && "bg-cyan-400/10")}
             >
               <TableCell className="font-mono">{row.name}</TableCell>
@@ -1062,19 +1075,36 @@ function Vlans({ result, t }: { result: AnalysisResult; t: Copy }) {
             </TableRow>
           ))}
         </DataTable>
+        <RecordPager page={interfacePage.page} pageCount={interfacePage.pageCount} total={result.interfaces.length} onPageChange={interfacePage.setPage} />
         {selected ? (
-          <DetailBlock
-            title={`${detailLabel(t)}: ${selected.name}`}
-            lines={[
-              `${t.table.status}: ${selected.status ?? "-"}`,
-              `${t.table.vlan}: ${selected.vlan ?? "-"}`,
-              `${t.table.mode}: ${selected.mode ?? "-"}`,
-              `${t.table.ip}: ${selected.ip ?? "-"}/${selected.prefix ?? "-"}`,
-              `Description: ${selected.description ?? "-"}`,
-              "",
-              ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
-            ]}
-          />
+          <AuditModal
+            open={detailsOpen}
+            onClose={() => setDetailsOpen(false)}
+            title={`${language === "th" ? "รายละเอียด Interface" : "Interface detail"}: ${selected.name}`}
+            subtitle={`${selected.evidence[0]?.device ?? "-"} · ${selected.vrf ?? "global"}`}
+          >
+            <div className="space-y-4 text-sm">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <DetailMetric label={t.table.status} value={selected.status ?? "-"} />
+                <DetailMetric label={t.table.vlan} value={selected.vlan ?? "-"} />
+                <DetailMetric label={t.table.mode} value={selected.mode ?? "-"} />
+              </div>
+              <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3 text-sm">
+                <dl className="grid grid-cols-[130px_minmax(0,1fr)] gap-x-3 gap-y-2">
+                  <dt className="text-muted-foreground">IP</dt><dd className="font-mono">{selected.ip ? `${selected.ip}/${selected.prefix ?? "?"}` : "-"}</dd>
+                  <dt className="text-muted-foreground">{language === "th" ? "คำอธิบาย" : "Description"}</dt><dd>{selected.description ?? "-"}</dd>
+                  <dt className="text-muted-foreground">{language === "th" ? "ที่มาคำอธิบาย" : "Description source"}</dt><dd>{selected.descriptionSource ?? "Unknown"}{selected.descriptionConfidence !== undefined ? ` · ${selected.descriptionConfidence}%` : ""}</dd>
+                  <dt className="text-muted-foreground">Port-channel</dt><dd>{selected.channelGroup ? `${selected.channelGroup} (${selected.channelMode ?? "-"})` : "-"}</dd>
+                  <dt className="text-muted-foreground">DHCP</dt><dd>{selected.dhcpSnoopingTrust ? "Trusted" : "-"}</dd>
+                </dl>
+              </div>
+              <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+                <div className="text-sm font-medium">{t.table.evidence}</div>
+                <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.evidence.map(line => `${line.device}:${line.line} [${line.command}] ${line.text}`).join("\n") || t.states.noEvidence}</pre>
+              </div>
+              <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.table.sources}:</span>{" "}{[...new Set(selected.evidence.map(line => line.command))].join(", ") || "-"}</div>
+            </div>
+          </AuditModal>
         ) : null}
       </CardContent>
     </Card>
@@ -1145,12 +1175,15 @@ function Configuration({ result, t, language }: { result: AnalysisResult; t: Cop
       key: string;
       category: string;
       feature: string;
+      scopeLabel: string;
       description?: string;
       values: string[];
       evidence: AnalysisResult["configFeatures"][number]["evidence"];
     }>();
     for (const item of result.configFeatures) {
-      const key = `${item.category}|${item.feature}`;
+      const scope = scopeFromEvidence(item.evidence);
+      const scopeLabel = `${scope.deviceId} · ${scope.vrf ?? "global"}`;
+      const key = `${scopeKey(scope)}|${item.scope ?? "global"}|${item.category}|${item.feature}`;
       const existing = grouped.get(key);
       if (existing) {
         existing.values.push(item.value ?? "-");
@@ -1161,6 +1194,7 @@ function Configuration({ result, t, language }: { result: AnalysisResult; t: Cop
         key,
         category: item.category,
         feature: item.feature,
+        scopeLabel,
         description: item.description,
         values: [item.value ?? "-"],
         evidence: [...item.evidence]
@@ -1194,6 +1228,7 @@ function Configuration({ result, t, language }: { result: AnalysisResult; t: Cop
                   className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3 text-left hover:bg-cyan-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
                 >
                   <div className="flex items-start justify-between gap-2"><span className="text-sm font-medium">{localizeConfigFeature(feature.feature, language)}</span><Badge severity="Info">{feature.evidence.length}</Badge></div>
+                  <div className="mt-1 font-mono text-[11px] text-cyan-100/65">{feature.scopeLabel}</div>
                   <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{localizeConfigDescription(feature.description, language)}</p>
                 </button>
               ))}
@@ -1205,7 +1240,7 @@ function Configuration({ result, t, language }: { result: AnalysisResult; t: Cop
         open={Boolean(selected)}
         onClose={() => setSelectedKey(null)}
         title={selected ? localizeConfigFeature(selected.feature, language) : ""}
-        subtitle={selected?.category}
+        subtitle={selected ? `${selected.category} · ${selected.scopeLabel}` : undefined}
       >
         {selected ? (
           <div className="space-y-4 text-sm">
@@ -1233,6 +1268,7 @@ function Configuration({ result, t, language }: { result: AnalysisResult; t: Cop
 
 function Security({ result, t }: { result: AnalysisResult; t: Copy }) {
   const [selectedId, setSelectedId] = useState(result.securityChecks[0]?.id ?? "");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const selected = result.securityChecks.find(check => check.id === selectedId) ?? result.securityChecks[0];
   return (
     <div className="space-y-4">
@@ -1240,14 +1276,18 @@ function Security({ result, t }: { result: AnalysisResult; t: Copy }) {
       <Card>
         <CardHeader><CardTitle>{t.tabs.security}</CardTitle><CardDescription>{t.panels.securityChecks}</CardDescription></CardHeader>
         <CardContent>
-          <DataTable headers={[t.table.check, t.table.status, t.table.severity, t.table.evidence, t.table.recommendation]}>
+          <DataTable headers={[t.table.check, t.table.sources, t.table.status, t.table.severity, t.table.evidence, t.table.recommendation]}>
             {result.securityChecks.map((check: SecurityCheck) => (
               <TableRow
                 key={check.id}
-                onClick={() => setSelectedId(check.id)}
+                onClick={() => {
+                  setSelectedId(check.id);
+                  setDetailsOpen(true);
+                }}
                 className={cn("cursor-pointer", selected?.id === check.id && "bg-cyan-400/10")}
               >
                 <TableCell>{translateSecurityCheck(check.name, isThaiCopy(t) ? "th" : "en")}</TableCell>
+                <TableCell className="font-mono text-xs">{check.evidence[0]?.device ?? "-"}</TableCell>
                 <TableCell><Badge severity={check.status === "Passed" ? "Passed" : check.severity}>{translateCheckStatus(check.status, t)}</Badge></TableCell>
                 <TableCell>{translateSeverity(check.severity, t)}</TableCell>
                 <TableCell>{check.evidence.length}</TableCell>
@@ -1256,16 +1296,21 @@ function Security({ result, t }: { result: AnalysisResult; t: Copy }) {
             ))}
           </DataTable>
           {selected ? (
-            <DetailBlock
+            <AuditModal
+              open={detailsOpen}
+              onClose={() => setDetailsOpen(false)}
               title={`${detailLabel(t)}: ${translateSecurityCheck(selected.name, isThaiCopy(t) ? "th" : "en")}`}
-              lines={[
-                `${t.table.status}: ${translateCheckStatus(selected.status, t)}`,
-                `${t.table.severity}: ${translateSeverity(selected.severity, t)}`,
-                `${t.table.recommendation}: ${translateFindingDescription(selected.recommendation, isThaiCopy(t) ? "th" : "en")}`,
-                "",
-                ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
-              ]}
-            />
+              subtitle={selected.evidence[0]?.device ?? "-"}
+            >
+              <div className="space-y-4 text-sm">
+                <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+                  <div className="flex flex-wrap items-center gap-2"><Badge severity={selected.status === "Passed" ? "Passed" : selected.severity}>{translateCheckStatus(selected.status, t)}</Badge><span>{translateSeverity(selected.severity, t)}</span></div>
+                  <p className="mt-3 leading-6">{translateFindingDescription(selected.recommendation, isThaiCopy(t) ? "th" : "en")}</p>
+                </div>
+                <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3"><div className="text-sm font-medium">{t.table.evidence}</div><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.evidence.map(line => `${line.device}:${line.line} [${line.command}] ${line.text}`).join("\n") || t.states.noEvidence}</pre></div>
+                <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.table.sources}:</span>{" "}{[...new Set(selected.evidence.map(line => line.command))].join(", ") || "-"}</div>
+              </div>
+            </AuditModal>
           ) : null}
         </CardContent>
       </Card>
@@ -1362,6 +1407,11 @@ function Settings({ t }: { t: Copy }) {
   );
 }
 
+function dhcpPoolKey(pool: AnalysisResult["dhcpPools"][number]): string {
+  const scope = scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf }));
+  return `${scope}|${pool.name}|${pool.host ?? pool.network ?? "-"}`;
+}
+
 function poolStats(result: AnalysisResult, pool: AnalysisResult["dhcpPools"][number]) {
   const poolScope = scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf }));
   const inScope = (evidence: AnalysisResult["dhcpPools"][number]["evidence"], vrf?: string) => scopeKey(scopeFromEvidence(evidence, { vrf })) === poolScope;
@@ -1387,7 +1437,7 @@ function DataTable({ headers, children }: { headers: string[]; children: React.R
   const rows = Children.toArray(children);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<{ column: number; direction: "asc" | "desc" } | null>(null);
-  const pageSize = 100;
+  const pageSize = 50;
   const [page, setPage] = useState(0);
   const filteredRows = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -1453,11 +1503,38 @@ function DataTable({ headers, children }: { headers: string[]; children: React.R
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>Showing {currentPage * pageSize + 1}-{Math.min(sortedRows.length, (currentPage + 1) * pageSize)} of {sortedRows.length}</span>
           <div className="flex gap-2">
-            <Button type="button" size="sm" variant="outline" disabled={currentPage === 0} onClick={() => setPage(value => Math.max(0, value - 1))}>Prev</Button>
-            <Button type="button" size="sm" variant="outline" disabled={currentPage >= pageCount - 1} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}>Next</Button>
+            <Button type="button" size="icon" variant="outline" title="Previous page" aria-label="Previous page" disabled={currentPage === 0} onClick={() => setPage(value => Math.max(0, value - 1))}><ChevronLeft className="h-4 w-4" /></Button>
+            <Button type="button" size="icon" variant="outline" title="Next page" aria-label="Next page" disabled={currentPage >= pageCount - 1} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}><ChevronRight className="h-4 w-4" /></Button>
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function useRecordPage<T>(records: T[], pageSize = 50) {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(records.length / pageSize));
+  const currentPage = Math.min(page, pageCount - 1);
+  return {
+    items: records.slice(currentPage * pageSize, currentPage * pageSize + pageSize),
+    page: currentPage,
+    pageCount,
+    setPage,
+  };
+}
+
+function RecordPager({ page, pageCount, total, onPageChange }: { page: number; pageCount: number; total: number; onPageChange: (page: number) => void }) {
+  if (pageCount <= 1) return null;
+  const start = page * 50 + 1;
+  const end = Math.min(total, (page + 1) * 50);
+  return (
+    <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+      <span>{start}-{end} / {total}</span>
+      <div className="flex gap-2">
+        <Button type="button" size="icon" variant="outline" title="Previous page" aria-label="Previous page" disabled={page === 0} onClick={() => onPageChange(page - 1)}><ChevronLeft className="h-4 w-4" /></Button>
+        <Button type="button" size="icon" variant="outline" title="Next page" aria-label="Next page" disabled={page >= pageCount - 1} onClick={() => onPageChange(page + 1)}><ChevronRight className="h-4 w-4" /></Button>
+      </div>
     </div>
   );
 }

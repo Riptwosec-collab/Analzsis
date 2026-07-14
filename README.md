@@ -8,11 +8,12 @@ NetScope analyzes the current CLI input locally in the browser. It does not send
 
 - Smart CLI import for paste and `.txt`, `.log`, `.cfg`, `.conf` files
 - Device, vendor, and command boundary detection
-- Modular parser structure for Cisco-style ARP, MAC table, DHCP binding, DHCP pool, interface, VLAN, running-config, logs, CDP, and LLDP
+- Modular parser structure for Cisco-style ARP, MAC table, DHCP binding, DHCP pool, interface, VLAN, named ACL, running-config, logs, CDP, and LLDP
 - IP inventory with Used, Likely Free, Reserved, Unknown status and confidence
 - Duplicate IP, MAC movement/flapping, DHCP pool utilization, deny/block/err-disabled findings
-- Security checks for DHCP Snooping, Dynamic ARP Inspection, Port Security, and plaintext secret exposure
-- Evidence and source line references for findings when available
+- Per-device security checks for DHCP Snooping, Dynamic ARP Inspection, Port Security, and plaintext secret exposure
+- Configuration-risk findings for SNMP RW communities, cleartext HTTP management, Telnet, permissive named ACLs, and DHCP Snooping trust coverage
+- Scoped evidence and source line references for findings, IP, subnet, pool, MAC, interface, and configuration details when available
 - Read-only troubleshooting command generator
 - React Flow topology view from CDP/LLDP
 - Export PDF, Excel, JSON, and Markdown reports

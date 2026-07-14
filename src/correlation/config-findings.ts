@@ -10,8 +10,82 @@ export function findConfigurationFindings(dataset: ParsedDataset): Finding[] {
     ...findDhcpGatewayMismatches(dataset),
     ...findOverlappingDynamicDhcpPools(dataset),
     ...findReservationsInsideDynamicPools(dataset),
+    ...findConfigurationSecurityRisks(dataset),
     ...findParserCoverageIssue(dataset)
   ];
+}
+
+function findConfigurationSecurityRisks(dataset: ParsedDataset): Finding[] {
+  const findings: Finding[] = [];
+  for (const block of dataset.commandBlocks.filter(item => item.command === "show running-config")) {
+    const scope = block.device;
+    const lines = block.lines;
+    const evidenceFor = (pattern: RegExp, redact = false) => lines
+      .filter(line => pattern.test(line.text.trim()))
+      .map(line => redact ? { ...line, text: redactSensitiveConfig(line.text) } : line);
+    const add = (id: string, severity: Finding["severity"], title: string, description: string, recommendation: string, evidence: Finding["evidence"], verificationCommands: string[]) => {
+      if (!evidence.length) return;
+      findings.push({ id: `${id}-${block.id}`, severity, category: "Security", title, target: scope, description, confidence: 96, evidence, recommendation, verificationCommands });
+    };
+
+    add(
+      "snmp-rw-community",
+      "High",
+      "SNMP read-write community configured",
+      `Device ${scope} has an SNMP v1/v2c read-write community. The community value is masked in this result because it is sensitive.`,
+      "Restrict the source ACL, prefer SNMPv3 authPriv, and remove read-write access unless a documented management workflow requires it.",
+      evidenceFor(/^snmp-server community\s+\S+\s+RW\b/i, true),
+      ["show running-config | include ^snmp-server community", "show snmp group", "show snmp user"]
+    );
+    add(
+      "http-management",
+      "Medium",
+      "Unencrypted HTTP management enabled",
+      `Device ${scope} enables the IOS HTTP management server. This review does not apply to HTTPS-only configuration.`,
+      "Disable cleartext HTTP management or restrict it to a dedicated management network and use HTTPS with an approved certificate.",
+      evidenceFor(/^ip http server$/i),
+      ["show running-config | include ^ip http", "show ip http server session-module"]
+    );
+    add(
+      "telnet-vty",
+      "High",
+      "Telnet is permitted on management lines",
+      `Device ${scope} permits Telnet on a console or VTY management line, which exposes credentials and session traffic in cleartext.`,
+      "Restrict management transport to SSH and confirm that an alternate management path is available before removing Telnet.",
+      evidenceFor(/^transport input\s+(?:.*\btelnet\b.*|all)$/i),
+      ["show running-config | section ^line vty", "show ip ssh", "show users"]
+    );
+    add(
+      "acl-permit-any-any",
+      "Low",
+      "Access list contains permit ip any any",
+      `Device ${scope} has an IPv4 ACL entry that permits all IPv4 traffic. This is a review item; the effective risk depends on interface direction and attachment.`,
+      "Check where the ACL is applied, its sequence, and preceding deny statements before changing policy.",
+      evidenceFor(/^(?:\d+\s+)?permit\s+ip\s+any\s+any$/i),
+      ["show ip access-lists", "show running-config | include ip access-group", "show running-config | section ^interface"]
+    );
+    const snoopingEvidence = evidenceFor(/^ip dhcp snooping(?:\s|$)/i);
+    const snoopingTrust = evidenceFor(/^ip dhcp snooping trust$/i);
+    if (snoopingEvidence.length && !snoopingTrust.length) {
+      findings.push({
+        id: `dhcp-snooping-no-trusted-port-${block.id}`,
+        severity: "Medium",
+        category: "Security",
+        title: "DHCP Snooping has no configured trusted port",
+        target: scope,
+        description: `Device ${scope} enables DHCP Snooping but the imported configuration contains no ip dhcp snooping trust statement. This may be intentional only when DHCP traffic does not traverse this device.`,
+        confidence: 82,
+        evidence: snoopingEvidence,
+        recommendation: "Confirm the DHCP server/uplink path and mark only the required uplink or server-facing ports as trusted.",
+        verificationCommands: ["show ip dhcp snooping", "show running-config | include ip dhcp snooping trust", "show interfaces trunk"]
+      });
+    }
+  }
+  return findings;
+}
+
+function redactSensitiveConfig(text: string): string {
+  return text.replace(/^(snmp-server community)\s+\S+(.*)$/i, "$1 [REDACTED]$2");
 }
 
 function findIncompleteDhcpPools(dataset: ParsedDataset): Finding[] {

@@ -1,4 +1,4 @@
-import type { CommandBlock, ConfigFeatureCategory, DhcpExcludedRangeRecord, DhcpPoolRecord, InterfaceRecord, ParsedDataset, VrfRecord } from "@/types/network";
+import type { AccessListRecord, CommandBlock, ConfigFeatureCategory, DhcpExcludedRangeRecord, DhcpPoolRecord, InterfaceRecord, ParsedDataset, VrfRecord } from "@/types/network";
 import { makeEvidence } from "@/parsers/detector/command-detector";
 import { maskToPrefix } from "@/utils/ip";
 import { normalizeInterface } from "@/utils/interface";
@@ -9,6 +9,7 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
   let currentPool: DhcpPoolRecord | null = null;
   let currentInterface: InterfaceRecord | null = null;
   let currentVrf: VrfRecord | null = null;
+  let currentNamedAcl: Pick<AccessListRecord, "name" | "family" | "aclType"> | null = null;
   let hostname = block.device;
   let version: string | undefined;
   let model: string | undefined;
@@ -76,20 +77,29 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
     const poolStart = text.match(/^ip dhcp pool\s+(.+)$/i);
     const interfaceStart = text.match(/^interface\s+(.+)$/i);
     const vrfStart = text.match(/^vrf definition\s+(.+)$/i);
+    const namedAclStart = text.match(/^ip access-list\s+(standard|extended)\s+(\S+)/i);
 
-    if (poolStart) {
+    if (namedAclStart) {
       finishPool(); finishInterface(); finishVrf();
+      currentNamedAcl = { name: namedAclStart[2], family: "ipv4", aclType: "named" };
+      addFeature(dataset, "Security", "Access List", namedAclStart[2], namedAclStart[2], evidence);
+      hit = true;
+    } else if (poolStart) {
+      finishPool(); finishInterface(); finishVrf();
+      currentNamedAcl = null;
       currentPool = { name: poolStart[1].trim(), defaultRouters: [], dnsServers: [], options: [], evidence: [evidence] };
       addFeature(dataset, "DHCP", "DHCP Pool", poolStart[1].trim(), poolStart[1].trim(), evidence);
       hit = true;
     } else if (interfaceStart) {
       finishPool(); finishInterface(); finishVrf();
+      currentNamedAcl = null;
       const name = normalizeInterface(interfaceStart[1]) ?? interfaceStart[1].trim();
       currentInterface = { name, vlan: parseVlanId(name), mode: /^(Vlan|Loopback|Tunnel)/i.test(name) ? "routed" : "unknown", shutdown: false, servicePolicies: [], helperAddresses: [], evidence: [evidence] };
       addFeature(dataset, "Interface", "Interface", name, name, evidence);
       hit = true;
     } else if (vrfStart) {
       finishPool(); finishInterface(); finishVrf();
+      currentNamedAcl = null;
       currentVrf = { name: vrfStart[1].trim(), addressFamilies: [], interfaces: [], evidence: [evidence] };
       addFeature(dataset, "Routing", "VRF", vrfStart[1].trim(), vrfStart[1].trim(), evidence);
       routing = true;
@@ -198,6 +208,23 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
         currentVrf.addressFamilies.push(family[1].trim()); currentVrf.evidence.push(evidence); hit = true;
       } else if (/^exit-address-family$/i.test(text)) {
         currentVrf.evidence.push(evidence); hit = true;
+      }
+    }
+
+    if (!hit && currentNamedAcl) {
+      const entry = text.match(/^(?:(\d+)\s+)?(permit|deny|remark)\s+(.+)/i);
+      if (entry) {
+        dataset.accessLists.push({
+          ...currentNamedAcl,
+          action: entry[2].toLowerCase() as "permit" | "deny" | "remark",
+          sequence: entry[1] ? Number(entry[1]) : undefined,
+          expression: entry[3].trim(),
+          evidence: [evidence],
+          description: `${currentNamedAcl.name} ${entry[2].toLowerCase()} entry`,
+          descriptionSource: "CLI",
+          descriptionConfidence: 100
+        });
+        hit = true;
       }
     }
 
@@ -326,6 +353,9 @@ function classify(text: string): [ConfigFeatureCategory, string, boolean?] | nul
     [/^line\s+(con|vty|aux)\b/i, "Management", "Management Line"],
     [/^ipv6 unicast-routing$/i, "Routing", "IPv6 Routing"],
     [/^(fhrp version|standby|vrrp)\b/i, "Routing", "First-Hop Redundancy"],
+    [/^router bgp\b/i, "Routing", "BGP"],
+    [/^router ospf\b/i, "Routing", "OSPF"],
+    [/^router eigrp\b/i, "Routing", "EIGRP"],
     [/^router\s+/i, "Routing", "Routing Protocol"],
     [/^clock timezone\b/i, "Management", "Timezone"],
     [/^ip domain-name\b/i, "Management", "Domain Name"],

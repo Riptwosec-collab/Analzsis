@@ -223,6 +223,7 @@ export function SubnetCheckDetails({ subnet, language }: SubnetCheckDetailsProps
 }
 
 function buildSubnetModel(subnet: SubnetRecord, result: AnalysisResult, language: "en" | "th") {
+  result = { ...result, commandBlocks: result.commandBlocks.filter(block => block.device === subnet.deviceId) };
   const subnetScope = scopeKey({ deviceId: subnet.deviceId, vrf: subnet.vrf });
   const inSubnetScope = (evidence: Evidence[], vrf?: string) => scopeKey(scopeFromEvidence(evidence, { vrf })) === subnetScope;
   const inventory = result.ipInventory.filter(row => row.deviceId === subnet.deviceId && row.vrf === subnet.vrf && ipInSubnet(row.ip, subnet.network, subnet.prefix));

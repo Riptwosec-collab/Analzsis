@@ -162,7 +162,12 @@ flow exporter SITE-COLLECTOR
 router omp
 ip nat inside source list NAT-ACL interface GigabitEthernet0/0/0 overload
 fhrp version vrrp v3
+snmp-server community demo RW 10
+ip http server
+line vty 0 4
+ transport input telnet ssh
 ip access-list extended USERS-IN
+ 10 permit ip any any
 `;
 
 describe("network utilities", () => {
@@ -237,6 +242,18 @@ describe("parser", () => {
     }
     expect(features.get("DHCP Snooping")?.description).toContain("trusted uplink ports");
     expect(features.get("NAT")?.description).toContain("inside/outside roles");
+    expect(parsed.accessLists).toContainEqual(expect.objectContaining({ name: "USERS-IN", aclType: "named", action: "permit", expression: "ip any any" }));
+  });
+
+  it("finds scoped configuration security risks and masks sensitive SNMP evidence", () => {
+    const result = analyzeCli(CONFIG_FEATURES_FRAGMENT);
+
+    expect(result.findings.some(item => item.title === "SNMP read-write community configured" && item.target === "EDGE-RT01")).toBe(true);
+    expect(result.findings.some(item => item.title === "Unencrypted HTTP management enabled")).toBe(true);
+    expect(result.findings.some(item => item.title === "Telnet is permitted on management lines")).toBe(true);
+    expect(result.findings.some(item => item.title === "Access list contains permit ip any any")).toBe(true);
+    const snmpFinding = result.findings.find(item => item.title === "SNMP read-write community configured");
+    expect(snmpFinding?.evidence[0]?.text).not.toContain("demo");
   });
 
   it("parses config fragments and detects duplicate reservations, incomplete pools, and gateway mismatch", () => {

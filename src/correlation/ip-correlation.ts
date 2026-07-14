@@ -595,45 +595,27 @@ function findLogFindings(dataset: ParsedDataset): Finding[] {
 }
 
 function buildSecurityChecks(dataset: ParsedDataset): SecurityCheck[] {
-  const configText = dataset.commandBlocks.filter(block => block.command === "show running-config").flatMap(block => block.lines).map(line => line.text).join("\n");
-  return [
-    {
-      id: "dhcp-snooping",
-      name: "DHCP Snooping",
-      status: /ip dhcp snooping/i.test(configText) ? "Passed" : "Unknown",
-      severity: "Medium",
-      evidence: findEvidence(dataset, /ip dhcp snooping/i),
-      recommendation: "Enable DHCP Snooping on access VLANs where supported and trust only uplinks."
-    },
-    {
-      id: "dynamic-arp-inspection",
-      name: "Dynamic ARP Inspection",
-      status: /ip arp inspection/i.test(configText) ? "Passed" : "Unknown",
-      severity: "Medium",
-      evidence: findEvidence(dataset, /ip arp inspection/i),
-      recommendation: "Enable DAI on user VLANs after DHCP Snooping bindings are validated."
-    },
-    {
-      id: "port-security",
-      name: "Port Security",
-      status: /switchport port-security/i.test(configText) ? "Passed" : "Warning",
-      severity: "Low",
-      evidence: findEvidence(dataset, /switchport port-security/i),
-      recommendation: "Use port-security, 802.1X, or NAC controls on access ports according to site policy."
-    },
-    {
-      id: "plain-secrets",
-      name: "Plaintext Secret Exposure",
-      status: /(password|secret|community)\s+\S+/i.test(configText) ? "Warning" : "Passed",
-      severity: "High",
-      evidence: findEvidence(dataset, /(password|secret|community)\s+\S+/i),
-      recommendation: "Mask credentials before sharing CLI output and rotate exposed secrets if needed."
-    }
-  ];
-}
-
-function findEvidence(dataset: ParsedDataset, pattern: RegExp) {
-  return dataset.commandBlocks.flatMap(block => block.lines.filter(line => pattern.test(line.text)));
+  const configBlocks = dataset.commandBlocks.filter(block => block.command === "show running-config");
+  if (!configBlocks.length) {
+    return [
+      { id: "dhcp-snooping-unknown", name: "DHCP Snooping", status: "Unknown", severity: "Medium", evidence: [], recommendation: "Collect show running-config and show ip dhcp snooping to verify this control." },
+      { id: "dynamic-arp-inspection-unknown", name: "Dynamic ARP Inspection", status: "Unknown", severity: "Medium", evidence: [], recommendation: "Collect show running-config and show ip arp inspection to verify this control." },
+      { id: "port-security-unknown", name: "Port Security", status: "Unknown", severity: "Low", evidence: [], recommendation: "Collect show running-config and show port-security to verify this control." },
+      { id: "plain-secrets-unknown", name: "Plaintext Secret Exposure", status: "Unknown", severity: "High", evidence: [], recommendation: "Run sensitive-data masking before sharing configuration output." }
+    ];
+  }
+  return configBlocks.flatMap(block => {
+    const configText = block.lines.map(line => line.text).join("\n");
+    const evidence = (pattern: RegExp, redact = false) => block.lines
+      .filter(line => pattern.test(line.text))
+      .map(line => redact ? { ...line, text: line.text.replace(/^(?:username\s+\S+\s+.*(?:secret|password)|snmp-server community\s+)\S+/i, "[REDACTED CONFIGURATION]") } : line);
+    return [
+      { id: `dhcp-snooping-${block.id}`, name: "DHCP Snooping", status: /ip dhcp snooping/i.test(configText) ? "Passed" : "Unknown", severity: "Medium", evidence: evidence(/ip dhcp snooping/i), recommendation: "Enable DHCP Snooping on access VLANs where supported and trust only uplinks." },
+      { id: `dynamic-arp-inspection-${block.id}`, name: "Dynamic ARP Inspection", status: /ip arp inspection/i.test(configText) ? "Passed" : "Unknown", severity: "Medium", evidence: evidence(/ip arp inspection/i), recommendation: "Enable DAI on user VLANs after DHCP Snooping bindings are validated." },
+      { id: `port-security-${block.id}`, name: "Port Security", status: /switchport port-security/i.test(configText) ? "Passed" : "Warning", severity: "Low", evidence: evidence(/switchport port-security/i), recommendation: "Use port-security, 802.1X, or NAC controls on access ports according to site policy." },
+      { id: `plain-secrets-${block.id}`, name: "Plaintext Secret Exposure", status: /(password|secret|community)\s+\S+/i.test(configText) ? "Warning" : "Passed", severity: "High", evidence: evidence(/(password|secret|community)\s+\S+/i, true), recommendation: "Mask credentials before sharing CLI output and rotate exposed secrets if needed." }
+    ] as SecurityCheck[];
+  });
 }
 
 function buildRecommendedCommands(findings: Finding[]): string[] {
