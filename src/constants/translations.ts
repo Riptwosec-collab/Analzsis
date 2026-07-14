@@ -87,6 +87,21 @@ export const translations = {
       sensitive: "Sensitive Data",
       parsingProgress: "Parsing Progress"
     },
+    dhcpAudit: {
+      checks: "Checks performed",
+      selectedCheck: "Selected check detail",
+      poolScope: "Pool scope and capacity",
+      leaseEvidence: "Lease and binding evidence",
+      excluded: "Excluded address policy",
+      reservations: "Reservation records",
+      conflicts: "DHCP conflict records",
+      services: "Gateway, DNS, and lease settings",
+      sourceEvidence: "Configuration source evidence",
+      selectRecord: "Select a record for details",
+      noRecords: "No related records were found in the imported CLI.",
+      checked: "Checked",
+      source: "Source"
+    },
     table: {
       command: "Command",
       status: "Status",
@@ -217,6 +232,21 @@ export const translations = {
       settings: "ตั้งค่าเฉพาะหน้าจอ ไม่บันทึก Raw CLI โดยค่าเริ่มต้น",
       sensitive: "ข้อมูลสำคัญ",
       parsingProgress: "สถานะการวิเคราะห์"
+    },
+    dhcpAudit: {
+      checks: "รายการที่ตรวจสอบแล้ว",
+      selectedCheck: "รายละเอียดหัวข้อที่เลือก",
+      poolScope: "ขอบเขตและความจุของ Pool",
+      leaseEvidence: "หลักฐาน Lease และ Binding",
+      excluded: "นโยบาย IP ที่ยกเว้น",
+      reservations: "รายการจอง IP",
+      conflicts: "รายการ DHCP Conflict",
+      services: "Gateway, DNS และการตั้งค่า Lease",
+      sourceEvidence: "หลักฐานจาก Config",
+      selectRecord: "เลือกรายการเพื่อดูรายละเอียด",
+      noRecords: "ไม่พบรายการที่เกี่ยวข้องจาก CLI ที่นำเข้า",
+      checked: "ตรวจสอบแล้ว",
+      source: "แหล่งตรวจ"
     },
     table: {
       command: "คำสั่ง",

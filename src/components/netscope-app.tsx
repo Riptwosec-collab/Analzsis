@@ -878,7 +878,7 @@ function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
             title={`DHCP pool detail: ${selected.name}`}
             subtitle={`${selected.network ?? "-"}/${selected.prefix ?? "-"} · pool free is not reusable free IP`}
           >
-            <DhcpPoolDetail pool={selected} stats={selectedStats} />
+            <DhcpPoolDetail pool={selected} stats={selectedStats} t={t} />
           </AuditModal>
         ) : null}
       </CardContent>
@@ -886,7 +886,117 @@ function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
   );
 }
 
-function DhcpPoolDetail({ pool, stats }: { pool: AnalysisResult["dhcpPools"][number]; stats: ReturnType<typeof poolStats> }) {
+type PoolAuditEntity = {
+  id: string;
+  label: string;
+  fields: Array<[string, string]>;
+  evidence: AnalysisResult["dhcpPools"][number]["evidence"];
+};
+
+type PoolAuditCheck = {
+  id: "scope" | "leases" | "excluded" | "reservations" | "conflicts" | "services" | "source";
+  label: string;
+  severity: Severity;
+  summary: string;
+  fields: Array<[string, string]>;
+  evidence: AnalysisResult["dhcpPools"][number]["evidence"];
+  entities?: PoolAuditEntity[];
+};
+
+function DhcpPoolDetail({ pool, stats, t }: { pool: AnalysisResult["dhcpPools"][number]; stats: ReturnType<typeof poolStats>; t: Copy }) {
+  const [selectedCheckId, setSelectedCheckId] = useState<PoolAuditCheck["id"]>("scope");
+  const reservationEntities: PoolAuditEntity[] = stats.reservationsRows.map((item, index) => ({
+    id: `reservation-${item.host}-${index}`,
+    label: item.host ?? item.name,
+    fields: [
+      [t.table.ip, item.host ?? "-"],
+      [t.table.mac, item.hardwareAddress ?? "-"],
+      ["Client ID", item.clientIdentifier ?? "-"],
+      [t.table.description, item.description ?? "-"],
+    ],
+    evidence: item.evidence,
+  }));
+  const excludedEntities: PoolAuditEntity[] = stats.excludedRanges.map((item, index) => ({
+    id: `excluded-${item.startIp}-${item.endIp}-${index}`,
+    label: item.startIp === item.endIp ? item.startIp : `${item.startIp} - ${item.endIp}`,
+    fields: [["Start IP", item.startIp], ["End IP", item.endIp], ["VRF", item.vrf ?? "global"]],
+    evidence: item.evidence,
+  }));
+  const conflictEntities: PoolAuditEntity[] = stats.conflictRows.map((item, index) => ({
+    id: `conflict-${item.ip}-${index}`,
+    label: item.ip,
+    fields: [[t.table.ip, item.ip], ["Method", item.detectionMethod ?? "-"], ["Time", item.detectionTime ?? "-"]],
+    evidence: item.evidence,
+  }));
+  const leaseEntities: PoolAuditEntity[] = stats.bindingRows.map((item, index) => ({
+    id: `binding-${item.ip}-${index}`,
+    label: item.ip,
+    fields: [[t.table.ip, item.ip], [t.table.mac, item.mac ?? "-"], [t.table.status, item.state ?? "-"], ["Lease", item.lease ?? "-"], ["Client ID", item.clientIdentifier ?? "-"]],
+    evidence: item.evidence,
+  }));
+  const checks: PoolAuditCheck[] = [
+    {
+      id: "scope",
+      label: t.dhcpAudit.poolScope,
+      severity: pool.network && pool.prefix !== undefined ? "Passed" : "Medium",
+      summary: pool.network && pool.prefix !== undefined ? `${pool.network}/${pool.prefix} · ${pool.total ?? 0} addresses` : "Network or prefix is not confirmed from the imported CLI.",
+      fields: [["Network", pool.network ? `${pool.network}/${pool.prefix ?? "-"}` : "-"], ["Reservation host", pool.host ?? "-"], ["Total addresses", String(pool.total ?? 0)], ["Utilization", pool.utilization === undefined ? "-" : `${pool.utilization}%`]],
+      evidence: pool.evidence,
+    },
+    {
+      id: "leases",
+      label: t.dhcpAudit.leaseEvidence,
+      severity: stats.bindingRows.length || pool.leased !== undefined ? "Info" : "Medium",
+      summary: `${stats.leased} leased reported · ${stats.bindingRows.length} binding records imported`,
+      fields: [["Reported leased", String(stats.leased)], ["Bindings imported", String(stats.bindingRows.length)], ["Pool free (DHCP only)", String(stats.poolFree)]],
+      evidence: stats.bindingRows.flatMap(item => item.evidence),
+      entities: leaseEntities,
+    },
+    {
+      id: "excluded",
+      label: t.dhcpAudit.excluded,
+      severity: "Info",
+      summary: `${stats.excluded} address(es) excluded across ${excludedEntities.length} range(s)`,
+      fields: [["Excluded addresses", String(stats.excluded)], ["Excluded ranges", String(excludedEntities.length)]],
+      evidence: stats.excludedRanges.flatMap(item => item.evidence),
+      entities: excludedEntities,
+    },
+    {
+      id: "reservations",
+      label: t.dhcpAudit.reservations,
+      severity: "Info",
+      summary: `${reservationEntities.length} reservation record(s) are inside this pool`,
+      fields: [["Reservations", String(reservationEntities.length)], ["Pool free after reservations", String(stats.poolFree)]],
+      evidence: stats.reservationsRows.flatMap(item => item.evidence),
+      entities: reservationEntities,
+    },
+    {
+      id: "conflicts",
+      label: t.dhcpAudit.conflicts,
+      severity: conflictEntities.length ? "High" : "Passed",
+      summary: conflictEntities.length ? `${conflictEntities.length} conflict record(s) require review` : "No DHCP conflict record was imported for this pool.",
+      fields: [["Conflicts", String(conflictEntities.length)]],
+      evidence: stats.conflictRows.flatMap(item => item.evidence),
+      entities: conflictEntities,
+    },
+    {
+      id: "services",
+      label: t.dhcpAudit.services,
+      severity: pool.defaultRouters.length || pool.dnsServers.length ? "Passed" : "Info",
+      summary: `${pool.defaultRouters.length} gateway(s) · ${pool.dnsServers.length} DNS server(s)`,
+      fields: [["Gateway", pool.defaultRouters.join(", ") || "-"], ["DNS", pool.dnsServers.join(", ") || "-"], ["Lease", pool.lease ?? "device default"], ["Domain", pool.domainName ?? "-"], ["Options", String(pool.options?.length ?? 0)]],
+      evidence: pool.evidence,
+    },
+    {
+      id: "source",
+      label: t.dhcpAudit.sourceEvidence,
+      severity: pool.evidence.length ? "Passed" : "Medium",
+      summary: `${pool.evidence.length} source line(s) confirm this pool configuration`,
+      fields: [["Device", pool.evidence[0]?.device ?? "-"], ["VRF", pool.vrf ?? "global"], ["Evidence lines", String(pool.evidence.length)]],
+      evidence: pool.evidence,
+    },
+  ];
+  const selectedCheck = checks.find(check => check.id === selectedCheckId) ?? checks[0];
   return (
     <div className="space-y-4 text-sm">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -898,24 +1008,57 @@ function DhcpPoolDetail({ pool, stats }: { pool: AnalysisResult["dhcpPools"][num
       <div className="rounded-lg border border-yellow-400/20 bg-yellow-400/5 p-3 text-xs leading-5">
         Pool free means addresses not currently leased inside the DHCP scope. It is not the same as reusable static free IP. Excluded, reserved, conflict, interface, and active binding evidence must be checked first.
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <PoolList title="Excluded ranges" rows={stats.excludedRanges.map(item => `${item.startIp}${item.endIp !== item.startIp ? ` - ${item.endIp}` : ""}`)} />
-        <PoolList title="Reservations" rows={stats.reservationsRows.map(item => `${item.host} · ${item.clientIdentifier ?? item.hardwareAddress ?? "-"}`)} />
-        <PoolList title="Conflicts" rows={stats.conflictRows.map(item => `${item.ip} · ${item.detectionMethod ?? "-"} · ${item.detectionTime ?? "-"}`)} />
-        <PoolList title="Gateway / DNS" rows={[`Gateway: ${pool.defaultRouters.join(", ") || "-"}`, `DNS: ${pool.dnsServers.join(", ") || "-"}`]} />
-      </div>
-      <PoolList
-        title="Lease / domain / options"
-        rows={[
-          `Lease: ${pool.lease ?? "device default"}${pool.leaseSeconds !== undefined ? ` (${pool.leaseSeconds}s)` : ""}`,
-          `Domain: ${pool.domainName ?? "-"}`,
-          ...(pool.options ?? []).map(option => `Option ${option.code}${option.format ? ` ${option.format}` : ""}: ${option.value}`)
-        ]}
-      />
-      <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-[11px] leading-5 text-cyan-50/80">
-        {pool.evidence.map(line => `${line.device}:${line.line} [${line.command}] ${line.text}`).join("\n") || "No evidence"}
-      </pre>
+      <section className="space-y-3">
+        <div className="text-sm font-semibold text-cyan-50">{t.dhcpAudit.checks}</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {checks.map(check => (
+            <button
+              key={check.id}
+              type="button"
+              onClick={() => setSelectedCheckId(check.id)}
+              className={cn("rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300", selectedCheck.id === check.id ? "border-cyan-300/70 bg-cyan-400/10" : "border-cyan-400/15 bg-slate-950/35 hover:bg-cyan-400/5")}
+            >
+              <div className="flex items-start justify-between gap-2"><span className="text-sm font-medium">{check.label}</span><Badge severity={check.severity}>{t.dhcpAudit.checked}</Badge></div>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{check.summary}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+      <PoolAuditCheckDetail key={selectedCheck.id} check={selectedCheck} t={t} />
     </div>
+  );
+}
+
+function PoolAuditCheckDetail({ check, t }: { check: PoolAuditCheck; t: Copy }) {
+  const [selectedEntityId, setSelectedEntityId] = useState("");
+  const selectedEntity = check.entities?.find(entity => entity.id === selectedEntityId);
+  const sourceEvidence = selectedEntity?.evidence ?? check.evidence;
+  return (
+    <section className="rounded-lg border border-cyan-400/25 bg-slate-950/45 p-4">
+      <div className="text-sm font-semibold text-cyan-50">{t.dhcpAudit.selectedCheck}: {check.label}</div>
+      <dl className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+        {check.fields.map(([label, value]) => <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-mono text-xs text-cyan-50">{value}</dd></div>)}
+      </dl>
+      {check.entities?.length ? (
+        <label className="mt-4 grid gap-1 text-xs text-muted-foreground">
+          {t.dhcpAudit.selectRecord}
+          <select value={selectedEntityId} onChange={event => setSelectedEntityId(event.target.value)} className="h-10 rounded-lg border bg-background px-3 font-mono text-sm text-foreground">
+            <option value="">-</option>
+            {check.entities.map(entity => <option key={entity.id} value={entity.id}>{entity.label}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {check.entities && !check.entities.length ? <p className="mt-4 text-xs text-muted-foreground">{t.dhcpAudit.noRecords}</p> : null}
+      {selectedEntity ? (
+        <div className="mt-4 rounded-md border border-cyan-400/15 bg-black/20 p-3">
+          <div className="font-mono text-sm text-cyan-100">{selectedEntity.label}</div>
+          <dl className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            {selectedEntity.fields.map(([label, value]) => <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-mono text-xs text-cyan-50">{value}</dd></div>)}
+          </dl>
+        </div>
+      ) : null}
+      <div className="mt-4 border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.dhcpAudit.source}:</span>{" "}{[...new Set(sourceEvidence.map(line => `${line.device} · ${line.command}`))].join(", ") || "-"}</div>
+    </section>
   );
 }
 
@@ -928,14 +1071,6 @@ function DetailMetric({ label, value }: { label: string; value: string | number 
   );
 }
 
-function PoolList({ title, rows }: { title: string; rows: string[] }) {
-  return (
-    <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
-      <div className="text-sm font-medium">{title}</div>
-      {rows.length ? <ul className="mt-2 space-y-1 text-xs">{rows.map(row => <li key={row}>- {row}</li>)}</ul> : <p className="mt-2 text-xs text-muted-foreground">-</p>}
-    </div>
-  );
-}
 
 function IpTable({
   title,
@@ -1412,10 +1547,11 @@ function poolStats(result: AnalysisResult, pool: AnalysisResult["dhcpPools"][num
   const excluded = excludedRanges.reduce((total, range) => total + ipRangeCount(range.startIp, range.endIp), 0);
   const reservations = result.dhcpPools.filter(item => inScope(item.evidence, item.vrf) && item.host && inPool(item.host));
   const conflictRows = result.dhcpConflicts.filter(item => inScope(item.evidence, item.vrf) && inPool(item.ip));
-  const leased = pool.leased ?? result.dhcpBindings.filter(item => inScope(item.evidence, item.vrf) && inPool(item.ip)).length;
+  const bindingRows = result.dhcpBindings.filter(item => inScope(item.evidence, item.vrf) && inPool(item.ip));
+  const leased = pool.leased ?? bindingRows.length;
   const total = pool.total ?? 0;
   const poolFree = Math.max(0, total - leased - excluded - reservations.length - conflictRows.length);
-  return { leased, total, poolFree, excluded, reserved: reservations.length, conflicts: conflictRows.length, excludedRanges, conflictRows, reservationsRows: reservations };
+  return { leased, total, poolFree, excluded, reserved: reservations.length, conflicts: conflictRows.length, excludedRanges, conflictRows, reservationsRows: reservations, bindingRows };
 }
 
 function ipRangeCount(startIp: string, endIp: string) {

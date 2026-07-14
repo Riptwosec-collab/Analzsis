@@ -12,6 +12,7 @@ NetScope analyzes the current CLI input locally in the browser. It does not send
 - IP inventory with Used, Likely Free, Reserved, Unknown status and confidence
 - TanStack-powered IP workspace with global evidence/description search, sortable columns, and real pagination
 - Duplicate IP, MAC movement/flapping, DHCP pool utilization, deny/block/err-disabled findings
+- DHCP pool audit checklist with on-demand lease, reservation, exclusion, conflict, gateway, and source details
 - Per-device security checks for DHCP Snooping, Dynamic ARP Inspection, Port Security, and plaintext secret exposure
 - Configuration-risk findings for SNMP RW communities, cleartext HTTP management, Telnet, permissive named ACLs, and DHCP Snooping trust coverage
 - Scoped evidence and source line references for findings, IP, subnet, pool, MAC, interface, and configuration details when available

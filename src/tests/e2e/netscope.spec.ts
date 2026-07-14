@@ -56,6 +56,21 @@ test("filters the full IP dataset before pagination and opens the matching recor
   await expect(page.getByRole("dialog", { name: /IP \/ MAC detail: 10\.10\.10\.10/ })).toBeVisible();
 });
 
+test("shows DHCP checks first instead of expanding raw reservation lists", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "\u0e42\u0e2b\u0e25\u0e14\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07" }).click();
+  await page.getByRole("button", { name: "\u0e27\u0e34\u0e40\u0e04\u0e23\u0e32\u0e30\u0e2b\u0e4c" }).first().click();
+  await page.getByRole("button", { name: /DHCP Pool/ }).first().click();
+  await page.getByRole("button", { name: "Open selected DHCP pool detail" }).click();
+
+  const dialog = page.getByRole("dialog", { name: /DHCP pool detail:/ });
+  await expect(dialog.getByText("\u0e23\u0e32\u0e22\u0e01\u0e32\u0e23\u0e17\u0e35\u0e48\u0e15\u0e23\u0e27\u0e08\u0e2a\u0e2d\u0e1a\u0e41\u0e25\u0e49\u0e27")).toBeVisible();
+  await expect(dialog.getByText("Excluded ranges")).toHaveCount(0);
+  await dialog.getByRole("button", { name: /\u0e23\u0e32\u0e22\u0e01\u0e32\u0e23\u0e08\u0e2d\u0e07 IP/ }).click();
+  await expect(dialog.getByText("\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e2b\u0e31\u0e27\u0e02\u0e49\u0e2d\u0e17\u0e35\u0e48\u0e40\u0e25\u0e37\u0e2d\u0e01")).toBeVisible();
+  await expect(dialog.getByText(/\u0e41\u0e2b\u0e25\u0e48\u0e07\u0e15\u0e23\u0e27\u0e08:/)).toBeVisible();
+});
+
 test("opens only the selected config feature and finding in detail dialogs", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "\u0e42\u0e2b\u0e25\u0e14\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07" }).click();
