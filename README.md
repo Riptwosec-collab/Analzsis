@@ -10,6 +10,7 @@ NetScope analyzes the current CLI input locally in the browser. It does not send
 - Device, vendor, and command boundary detection
 - Modular parser structure for Cisco-style ARP, MAC table, DHCP binding, DHCP pool, interface, VLAN, named ACL, running-config, logs, CDP, and LLDP
 - IP inventory with Used, Likely Free, Reserved, Unknown status and confidence
+- TanStack-powered IP workspace with global evidence/description search, sortable columns, and real pagination
 - Duplicate IP, MAC movement/flapping, DHCP pool utilization, deny/block/err-disabled findings
 - Per-device security checks for DHCP Snooping, Dynamic ARP Inspection, Port Security, and plaintext secret exposure
 - Configuration-risk findings for SNMP RW communities, cleartext HTTP management, Telnet, permissive named ACLs, and DHCP Snooping trust coverage
@@ -112,7 +113,7 @@ Analysis quality depends on the CLI data supplied by the user. An IP not found i
 ## Roadmap
 
 - FortiGate, Aruba, Juniper, and MikroTik parser modules
-- Virtualized data tables for very large imports
+- Virtualization beyond the current paginated table threshold for very large imports
 - Deeper ACL and Layer 2 security rules
 - Full report templates per report type
 - Broader Playwright accessibility checks

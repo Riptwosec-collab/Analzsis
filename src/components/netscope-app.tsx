@@ -42,9 +42,11 @@ import { SubnetCheckDetails } from "@/components/subnet-check-details";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RecordTable } from "@/components/tables/record-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import type { ColumnDef } from "@tanstack/react-table";
 
 type Copy = (typeof translations)["en"] | (typeof translations)["th"];
 type MetricFocus =
@@ -518,11 +520,11 @@ function ViewRouter({
     case "configuration":
       return <Configuration result={result} t={t} language={language} />;
     case "ip-inventory":
-      return <IpTable title={t.tabs["ip-inventory"]} rows={filterInventory(result.ipInventory, query)} query={query} setQuery={setQuery} t={t} />;
+      return <IpTable title={t.tabs["ip-inventory"]} rows={result.ipInventory} filter={query} setFilter={setQuery} t={t} />;
     case "free-ip":
-      return <IpTable title={t.tabs["free-ip"]} rows={filterInventory(result.freeIps, query)} query={query} setQuery={setQuery} t={t} />;
+      return <IpTable title={t.tabs["free-ip"]} rows={result.freeIps} filter={query} setFilter={setQuery} t={t} />;
     case "used-ip":
-      return <IpTable title={t.tabs["used-ip"]} rows={filterInventory(result.usedIps, query)} query={query} setQuery={setQuery} t={t} />;
+      return <IpTable title={t.tabs["used-ip"]} rows={result.usedIps} filter={query} setFilter={setQuery} t={t} />;
     case "devices":
       return <Devices result={result} t={t} />;
     case "vlans":
@@ -733,13 +735,13 @@ function MetricDrilldown({ focus, result, t, language }: { focus: MetricFocus; r
     case "usable":
       return <SubnetTable result={result} t={t} />;
     case "used":
-      return <IpTable title={t.metrics.used} rows={result.usedIps} query="" setQuery={() => undefined} t={t} />;
+      return <IpTable title={t.metrics.used} rows={result.usedIps} t={t} />;
     case "free":
-      return <IpTable title={t.metrics.free} rows={result.freeIps} query="" setQuery={() => undefined} t={t} />;
+      return <IpTable title={t.metrics.free} rows={result.freeIps} t={t} />;
     case "reserved":
-      return <IpTable title={t.metrics.reserved} rows={result.ipInventory.filter(row => row.status === "Reserved")} query="" setQuery={() => undefined} t={t} />;
+      return <IpTable title={t.metrics.reserved} rows={result.ipInventory.filter(row => row.status === "Reserved")} t={t} />;
     case "unknown":
-      return <IpTable title={t.metrics.unknown} rows={result.ipInventory.filter(row => row.status === "Unknown")} query="" setQuery={() => undefined} t={t} />;
+      return <IpTable title={t.metrics.unknown} rows={result.ipInventory.filter(row => row.status === "Unknown")} t={t} />;
     case "pools":
       return <DhcpPools result={result} t={t} />;
     case "posture":
@@ -938,20 +940,34 @@ function PoolList({ title, rows }: { title: string; rows: string[] }) {
 function IpTable({
   title,
   rows,
-  query,
-  setQuery,
+  filter,
+  setFilter,
   t
 }: {
   title: string;
   rows: IpInventoryRecord[];
-  query: string;
-  setQuery: (query: string) => void;
+  filter?: string;
+  setFilter?: (query: string) => void;
   t: Copy;
 }) {
-  const [selectedId, setSelectedId] = useState(rows[0]?.id ?? "");
+  const [selected, setSelected] = useState<IpInventoryRecord | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const ipPage = useRecordPage(rows);
-  const selected = rows.find(row => row.id === selectedId) ?? rows[0];
+  const columns = useMemo<ColumnDef<IpInventoryRecord, unknown>[]>(() => [
+    { accessorKey: "deviceId", header: t.table.device },
+    { accessorKey: "vrf", header: t.table.vrf },
+    {
+      accessorKey: "ip",
+      header: t.table.ip,
+      sortingFn: (left, right) => (ipToNumber(left.original.ip) ?? 0) - (ipToNumber(right.original.ip) ?? 0),
+    },
+    { accessorKey: "status", header: t.table.status, cell: info => <Badge severity={ipStatusSeverity(info.row.original.status)}>{translateIpStatus(info.row.original.status, t)}</Badge> },
+    { accessorKey: "confidence", header: t.table.confidence, cell: info => `${info.row.original.confidence}%` },
+    { accessorKey: "description", header: t.table.description, cell: info => info.row.original.description ?? "-" },
+    { id: "mac", accessorFn: row => row.macs.join(", "), header: t.table.mac, cell: info => <span className="font-mono">{info.row.original.macs.join(", ") || "-"}</span> },
+    { id: "vlan", accessorFn: row => row.vlans.join(", "), header: t.table.vlan, cell: info => info.row.original.vlans.join(", ") || "-" },
+    { id: "port", accessorFn: row => row.ports.join(", "), header: t.table.ports, cell: info => <span className="font-mono">{info.row.original.ports.join(", ") || "-"}</span> },
+    { id: "sources", accessorFn: row => row.sources.join(", "), header: t.table.sources, cell: info => info.row.original.sources.join(", ") || "-" },
+  ], [t]);
   return (
     <Card>
       <CardHeader>
@@ -959,44 +975,20 @@ function IpTable({
         <CardDescription>{rows.length} {t.panels.currentRows}</CardDescription>
       </CardHeader>
       <CardContent>
-        <input
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder={t.actions.search}
-          className="mb-3 h-10 w-full rounded-lg border px-3 text-sm"
+        <RecordTable
+          data={rows}
+          columns={columns}
+          filter={filter}
+          onFilterChange={setFilter}
+          labels={t.table}
+          searchText={ipSearchText}
+          getRowId={row => row.id}
+          getRowLabel={row => `${t.table.ip} ${row.ip}`}
+          onRowClick={row => {
+            setSelected(row);
+            setDetailsOpen(true);
+          }}
         />
-        <DataTable headers={[t.table.ip, t.table.status, t.table.confidence, t.table.mac, t.table.vlan, t.table.ports, t.table.sources]}>
-          {ipPage.items.map(row => (
-            <TableRow
-              key={row.id}
-              onClick={() => {
-                setSelectedId(row.id);
-                setDetailsOpen(true);
-              }}
-              className={cn("cursor-pointer", selected?.id === row.id && "bg-cyan-400/10")}
-            >
-              <TableCell className="font-mono">{row.ip}</TableCell>
-              <TableCell><Badge severity={ipStatusSeverity(row.status)}>{translateIpStatus(row.status, t)}</Badge></TableCell>
-              <TableCell>{row.confidence}%</TableCell>
-              <TableCell className="font-mono">{row.macs.join(", ") || "-"}</TableCell>
-              <TableCell>{row.vlans.join(", ") || "-"}</TableCell>
-              <TableCell className="font-mono">{row.ports.join(", ") || "-"}</TableCell>
-              <TableCell>{row.sources.join(", ")}</TableCell>
-            </TableRow>
-          ))}
-        </DataTable>
-        <RecordPager page={ipPage.page} pageCount={ipPage.pageCount} total={rows.length} onPageChange={ipPage.setPage} />
-        {selected ? (
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
-            <div className="font-mono text-cyan-100">{selected.ip}</div>
-            <div>{t.table.status}: {translateIpStatus(selected.status, t)}</div>
-            <div>{t.table.mac}: <span className="font-mono">{selected.macs.join(", ") || "-"}</span></div>
-            <div>{t.table.sources}: {selected.sources.join(", ") || "-"}</div>
-            <Button type="button" size="sm" onClick={() => setDetailsOpen(true)}>
-              Open selected IP / MAC detail
-            </Button>
-          </div>
-        ) : null}
         {selected ? (
           <AuditModal
             open={detailsOpen}
@@ -1671,21 +1663,24 @@ function FilePicker({ label, onText }: { label: string; onText: (text: string) =
   );
 }
 
-function filterInventory(rows: IpInventoryRecord[], query: string) {
-  if (!query.trim()) return rows;
-  const q = query.toLowerCase();
-  return rows.filter(row => [
+function ipSearchText(row: IpInventoryRecord) {
+  return [
+    row.deviceId,
+    row.vrf,
     row.ip,
     row.status,
     row.statusReason ?? "",
+    row.description ?? "",
+    row.descriptionSource ?? "",
     ...row.macs,
     ...row.ports,
     ...row.sources,
     ...(row.checkedSources ?? []),
     ...(row.missingSources ?? []),
     ...(row.relatedPoolNames ?? []),
-    ...row.vlans.map(String)
-  ].join(" ").toLowerCase().includes(q));
+    ...row.vlans.map(String),
+    ...row.evidence.map(item => item.text)
+  ].join(" ");
 }
 
 async function runAnalysis(text: string): Promise<AnalysisResult> {

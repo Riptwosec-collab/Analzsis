@@ -104,7 +104,16 @@ export const translations = {
       check: "Check",
       severity: "Severity",
       evidence: "Evidence",
-      recommendation: "Recommendation"
+      recommendation: "Recommendation",
+      device: "Device",
+      vrf: "VRF",
+      description: "Description",
+      filter: "Filter all records",
+      showing: "Showing",
+      of: "of",
+      previousPage: "Previous page",
+      nextPage: "Next page",
+      noResults: "No matching records"
     },
     actions: {
       copyCommands: "Copy Commands",
@@ -226,7 +235,16 @@ export const translations = {
       check: "รายการตรวจ",
       severity: "ระดับ",
       evidence: "หลักฐาน",
-      recommendation: "คำแนะนำ"
+      recommendation: "คำแนะนำ",
+      device: "อุปกรณ์",
+      vrf: "VRF",
+      description: "คำอธิบาย",
+      filter: "กรองทุกรายการ",
+      showing: "แสดง",
+      of: "จาก",
+      previousPage: "หน้าก่อนหน้า",
+      nextPage: "หน้าถัดไป",
+      noResults: "ไม่พบรายการที่ตรงกัน"
     },
     actions: {
       copyCommands: "คัดลอกคำสั่ง",
