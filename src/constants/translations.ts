@@ -102,6 +102,23 @@ export const translations = {
       checked: "Checked",
       source: "Source"
     },
+    audit: {
+      title: "Verification Summary",
+      subtitle: "Only checks supported by the current CLI are summarized. Details stay hidden until selected.",
+      showAll: "Show all",
+      collapseAll: "Collapse all",
+      viewDetails: "View details",
+      openWorkspace: "Open related workspace",
+      normal: "Normal",
+      review: "Review",
+      issue: "Anomaly",
+      noData: "No data",
+      records: "records found",
+      sources: "source command(s)",
+      categories: {
+        device: "Devices and interfaces", ipSubnet: "IP addresses and subnets", routing: "Routing", vlan: "VLAN and switch ports", trunk: "Trunks", mac: "MAC address table", arp: "ARP table", pool: "DHCP pools", binding: "DHCP bindings", excluded: "DHCP excluded addresses", reserved: "Reserved IPs", stp: "Spanning Tree", etherchannel: "EtherChannel / Port-Channel", acl: "Access lists", nat: "NAT", security: "Security configuration", neighbor: "Neighbor discovery", parser: "Parser warnings", conflict: "Conflicts and anomalies", topology: "Topology"
+      }
+    },
     table: {
       command: "Command",
       status: "Status",
@@ -247,6 +264,23 @@ export const translations = {
       noRecords: "ไม่พบรายการที่เกี่ยวข้องจาก CLI ที่นำเข้า",
       checked: "ตรวจสอบแล้ว",
       source: "แหล่งตรวจ"
+    },
+    audit: {
+      title: "สรุปการตรวจสอบ",
+      subtitle: "สรุปเฉพาะสิ่งที่ตรวจได้จาก CLI รอบปัจจุบัน โดยซ่อนรายละเอียดไว้จนกว่าจะเลือกหัวข้อ",
+      showAll: "แสดงทั้งหมด",
+      collapseAll: "ย่อทั้งหมด",
+      viewDetails: "ดูรายละเอียด",
+      openWorkspace: "เปิดหน้าข้อมูลที่เกี่ยวข้อง",
+      normal: "ปกติ",
+      review: "ควรตรวจสอบ",
+      issue: "ผิดปกติ",
+      noData: "ไม่มีข้อมูล",
+      records: "รายการที่พบ",
+      sources: "คำสั่งต้นทาง",
+      categories: {
+        device: "อุปกรณ์และ Interface", ipSubnet: "IP Address และ Subnet", routing: "Routing", vlan: "VLAN และ Switch Port", trunk: "Trunk", mac: "MAC Address Table", arp: "ARP Table", pool: "DHCP Pool", binding: "DHCP Binding", excluded: "DHCP Excluded Address", reserved: "Reserved IP", stp: "Spanning Tree", etherchannel: "EtherChannel / Port-Channel", acl: "ACL", nat: "NAT", security: "Security Configuration", neighbor: "Neighbor Discovery", parser: "Parser Warning", conflict: "ความขัดแย้งและความผิดปกติ", topology: "Topology"
+      }
     },
     table: {
       command: "คำสั่ง",

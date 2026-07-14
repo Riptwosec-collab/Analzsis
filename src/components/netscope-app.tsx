@@ -24,7 +24,6 @@ import {
   Trash2,
   Upload
 } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useTheme } from "next-themes";
 import { NAV_ITEMS, type ViewId } from "@/constants/navigation";
 import { SAMPLE_DATA } from "@/constants/sample-data";
@@ -183,7 +182,10 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
             {result && activeView !== "import" ? (
               metricFocus
                 ? <MetricDrilldown focus={metricFocus} result={result} t={t} language={language} />
-                : <ViewRouter view={activeView} result={result} query={query} setQuery={setQuery} t={t} language={language} />
+                : <ViewRouter view={activeView} result={result} query={query} setQuery={setQuery} t={t} language={language} onOpenView={(view, focus) => {
+                  setMetricFocus(focus ?? null);
+                  setActiveView(view);
+                }} />
             ) : null}
           </section>
         </main>
@@ -505,7 +507,8 @@ function ViewRouter({
   query,
   setQuery,
   t,
-  language
+  language,
+  onOpenView
 }: {
   view: ViewId;
   result: AnalysisResult;
@@ -513,10 +516,11 @@ function ViewRouter({
   setQuery: (query: string) => void;
   t: Copy;
   language: Language;
+  onOpenView: (view: ViewId, focus?: MetricFocus) => void;
 }) {
   switch (view) {
     case "overview":
-      return <Overview result={result} t={t} />;
+      return <Overview result={result} t={t} onOpenView={onOpenView} />;
     case "configuration":
       return <Configuration result={result} t={t} language={language} />;
     case "ip-inventory":
@@ -546,7 +550,7 @@ function ViewRouter({
     case "import":
       return <ImportDetails t={t} result={result} sensitiveHits={[]} progress="" />;
     default:
-      return <Overview result={result} t={t} />;
+      return <Overview result={result} t={t} onOpenView={onOpenView} />;
   }
 }
 
@@ -621,47 +625,95 @@ function ImportDetails({
   );
 }
 
-function Overview({ result, t }: { result: AnalysisResult; t: Copy }) {
-  const issueData = ["Critical", "High", "Medium", "Low"].map(severity => ({
-    severity: translateSeverity(severity as Severity, t),
-    count: result.findings.filter(finding => finding.severity === severity).length
-  }));
-  const ipData = [
-    { name: t.metrics.used, value: result.usedIps.length },
-    { name: t.metrics.free, value: result.freeIps.length },
-    { name: t.metrics.reserved, value: result.ipInventory.filter(item => item.status === "Reserved").length },
-    { name: t.metrics.unknown, value: result.ipInventory.filter(item => item.status === "Unknown").length }
-  ];
+type AuditCategoryId = keyof (typeof translations)["en"]["audit"]["categories"];
+type AuditState = "normal" | "review" | "issue" | "noData";
 
+type AuditCategory = {
+  id: AuditCategoryId;
+  count: number;
+  state: AuditState;
+  sources: string[];
+  view?: ViewId;
+  metricFocus?: MetricFocus;
+};
+
+function Overview({ result, t, onOpenView }: { result: AnalysisResult; t: Copy; onOpenView: (view: ViewId, focus?: MetricFocus) => void }) {
+  return <VerificationSummary result={result} t={t} onOpenView={onOpenView} />;
+}
+
+function VerificationSummary({ result, t, onOpenView }: { result: AnalysisResult; t: Copy; onOpenView: (view: ViewId, focus?: MetricFocus) => void }) {
+  const [expanded, setExpanded] = useState<AuditCategoryId[]>([]);
+  const [selectedId, setSelectedId] = useState<AuditCategoryId | null>(null);
+  const categories = useMemo(() => buildAuditCategories(result), [result]);
+  const selected = categories.find(category => category.id === selectedId);
+  const allIds = categories.map(category => category.id);
+  const stateLabel = (state: AuditState) => t.audit[state];
+  const stateSeverity = (state: AuditState): Severity => state === "normal" ? "Passed" : state === "review" ? "Medium" : state === "issue" ? "High" : "Info";
   return (
-    <div className="space-y-4">
-      <CommandCoverage result={result} t={t} />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ChartCard title={t.panels.ipStatus}>
-          <ResponsiveContainer width="100%" height={240}>
-            <PieChart>
-              <Pie data={ipData} dataKey="value" outerRadius={90} label>
-                {ipData.map((entry, index) => <Cell key={entry.name} fill={["#20e39a", "#39efff", "#a855f7", "#8daac2"][index]} />)}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </ChartCard>
-        <ChartCard title={t.panels.issueSeverity}>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={issueData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,217,255,0.12)" />
-              <XAxis dataKey="severity" />
-              <YAxis allowDecimals={false} />
-              <Tooltip />
-              <Bar dataKey="count" fill="#39efff" />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </div>
-      <Findings title={t.panels.criticalFindings} findings={result.findings.slice(0, 6)} t={t} language={isThaiCopy(t) ? "th" : "en"} />
-    </div>
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><CardTitle>{t.audit.title}</CardTitle><CardDescription>{t.audit.subtitle}</CardDescription></div>
+          <div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setExpanded(allIds)}>{t.audit.showAll}</Button><Button type="button" size="sm" variant="outline" onClick={() => setExpanded([])}>{t.audit.collapseAll}</Button></div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 lg:grid-cols-2">
+        {categories.map(category => {
+          const isExpanded = expanded.includes(category.id);
+          return (
+            <section key={category.id} className="rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold text-cyan-50">{t.audit.categories[category.id]}</h2><p className="mt-1 text-xs text-muted-foreground">{category.count} {t.audit.records} · {category.sources.length} {t.audit.sources}</p></div><Badge severity={stateSeverity(category.state)}>{stateLabel(category.state)}</Badge></div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{auditCategorySummary(category, t)}</p>
+              <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" onClick={() => setSelectedId(category.id)}>{t.audit.viewDetails}</Button><Button type="button" size="sm" variant="outline" onClick={() => setExpanded(current => current.includes(category.id) ? current : [...current, category.id])}>{t.audit.showAll}</Button><Button type="button" size="sm" variant="ghost" onClick={() => setExpanded(current => current.filter(id => id !== category.id))}>{t.audit.collapseAll}</Button></div>
+              {isExpanded ? <div className="mt-3 border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.table.sources}:</span>{" "}{category.sources.join(", ") || t.states.noEvidence}</div> : null}
+            </section>
+          );
+        })}
+      </CardContent>
+      <AuditModal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selected ? t.audit.categories[selected.id] : ""} subtitle={selected ? `${selected.count} ${t.audit.records} · ${stateLabel(selected.state)}` : ""}>
+        {selected ? <div className="space-y-4 text-sm"><div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3"><div className="flex items-center gap-2"><Badge severity={stateSeverity(selected.state)}>{stateLabel(selected.state)}</Badge><span>{selected.count} {t.audit.records}</span></div><p className="mt-3 leading-6 text-muted-foreground">{auditCategorySummary(selected, t)}</p></div><div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3"><div className="text-sm font-medium">{t.table.sources}</div><p className="mt-2 break-words font-mono text-xs text-cyan-100/80">{selected.sources.join(", ") || t.states.noEvidence}</p></div>{selected.view || selected.metricFocus ? <Button type="button" onClick={() => { setSelectedId(null); onOpenView(selected.view ?? "overview", selected.metricFocus); }}>{t.audit.openWorkspace}</Button> : null}</div> : null}
+      </AuditModal>
+    </Card>
   );
+}
+
+function buildAuditCategories(result: AnalysisResult): AuditCategory[] {
+  const sources = (commands: string[]) => [...new Set(result.commandBlocks.filter(block => commands.includes(block.command)).map(block => block.rawCommand))];
+  const withState = (id: AuditCategoryId, count: number, sourceCommands: string[], view?: ViewId, issues = 0, metricFocus?: MetricFocus): AuditCategory => {
+    const actualSources = sources(sourceCommands);
+    return { id, count, sources: actualSources, view, metricFocus, state: !count && !actualSources.length ? "noData" : issues ? "issue" : !count ? "review" : "normal" };
+  };
+  const config = (feature: string) => result.configFeatures.filter(item => item.feature === feature).length;
+  const configCategory = (category: string) => result.configFeatures.filter(item => item.category === category).length;
+  return [
+    withState("device", result.devices.length + result.interfaces.length, ["show running-config", "show ip interface brief", "show interfaces status"], "devices"),
+    withState("ipSubnet", result.ipInventory.length + result.subnets.length, ["show ip arp", "show arp", "show ip dhcp binding", "show ip interface brief"], "ip-inventory", result.findings.filter(item => /duplicate ip|gateway.*mismatch|overlap/i.test(item.title)).length),
+    withState("routing", result.staticRoutes.length + result.vrfs.length, ["show ip route", "show vrf", "show running-config"], "configuration"),
+    withState("vlan", result.vlans.length + result.interfaces.filter(item => item.vlan !== undefined).length, ["show vlan brief", "show interfaces status", "show interfaces switchport"], "vlans"),
+    withState("trunk", result.interfaces.filter(item => item.mode === "trunk").length, ["show interfaces trunk", "show running-config"], "vlans"),
+    withState("mac", result.macTable.length, ["show mac address-table"], "ip-inventory", result.findings.filter(item => /mac.*flap|mac.*movement/i.test(item.title)).length),
+    withState("arp", result.arp.length, ["show ip arp", "show arp"], "ip-inventory"),
+    withState("pool", result.dhcpPools.filter(pool => pool.poolType !== "Reservation").length, ["show ip dhcp pool", "show running-config"], undefined, result.findings.filter(item => /dhcp.*pool|pool.*dhcp/i.test(item.title)).length, "pools"),
+    withState("binding", result.dhcpBindings.length, ["show ip dhcp binding"], "ip-inventory"),
+    withState("excluded", result.dhcpExcludedRanges.length, ["show running-config"], undefined),
+    withState("reserved", result.ipInventory.filter(item => item.status === "Reserved").length, ["show running-config", "show ip dhcp binding"], "ip-inventory"),
+    withState("stp", result.interfaces.filter(item => item.stpRole || item.stpState).length, ["show spanning-tree", "show spanning-tree detail"], "vlans"),
+    withState("etherchannel", result.interfaces.filter(item => item.channelGroup).length, ["show etherchannel summary"], "vlans"),
+    withState("acl", result.accessLists.length, ["show access-lists", "show ip access-lists", "show running-config"], "configuration"),
+    withState("nat", config("NAT"), ["show running-config"], "configuration"),
+    withState("security", result.securityChecks.length + configCategory("Security"), ["show running-config", "show ip dhcp snooping", "show ip arp inspection"], "security", result.securityChecks.filter(check => check.status === "Warning" || check.status === "Failed").length),
+    withState("neighbor", result.topology.length, ["show cdp neighbors detail", "show lldp neighbors detail"], "topology"),
+    withState("parser", result.parserWarnings.length, result.parserWarnings.flatMap(item => item.evidence.map(evidence => evidence.command)), "import", result.parserWarnings.length),
+    withState("conflict", result.findings.length + result.dhcpConflicts.length + result.blockedDevices.length, ["show logging", "show ip dhcp conflict", "show ip arp", "show mac address-table"], "conflicts", result.findings.length + result.dhcpConflicts.length + result.blockedDevices.length),
+    withState("topology", result.topology.length, ["show cdp neighbors detail", "show lldp neighbors detail"], "topology"),
+  ];
+}
+
+function auditCategorySummary(category: AuditCategory, t: Copy): string {
+  if (category.state === "noData") return t.states.noEvidence;
+  if (category.state === "issue") return `${t.audit.issue}: ${category.count} ${t.audit.records}`;
+  if (category.state === "review") return `${t.audit.review}: ${category.count} ${t.audit.records}`;
+  return `${t.audit.normal}: ${category.count} ${t.audit.records}`;
 }
 
 function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
@@ -1749,15 +1801,6 @@ function MetricCard({
         <div className={cn("cyber-metric-value mt-2 text-3xl font-semibold", toneClass)}>{value}</div>
         </button>
       </CardContent>
-    </Card>
-  );
-}
-
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <Card>
-      <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
-      <CardContent>{children}</CardContent>
     </Card>
   );
 }

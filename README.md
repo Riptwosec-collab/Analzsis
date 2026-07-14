@@ -11,6 +11,7 @@ NetScope analyzes the current CLI input locally in the browser. It does not send
 - Modular parser structure for Cisco-style ARP, MAC table, DHCP binding, DHCP pool, interface, VLAN, named ACL, running-config, logs, CDP, and LLDP
 - IP inventory with Used, Likely Free, Reserved, Unknown status and confidence
 - TanStack-powered IP workspace with global evidence/description search, sortable columns, and real pagination
+- Collapsed verification summary covering device, IP, DHCP, Layer 2, routing, security, parser, conflict, and topology evidence
 - Duplicate IP, MAC movement/flapping, DHCP pool utilization, deny/block/err-disabled findings
 - DHCP pool audit checklist with on-demand lease, reservation, exclusion, conflict, gateway, and source details
 - Per-device security checks for DHCP Snooping, Dynamic ARP Inspection, Port Security, and plaintext secret exposure
