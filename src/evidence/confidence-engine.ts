@@ -32,13 +32,12 @@ export function calculateConfidence(input: ConfidenceInput): ConfidenceBreakdown
 }
 
 function freshnessScore(evidence: Evidence[]): number {
-  const ages = evidence.map(item => item.scope?.sourceAgeSeconds).filter((value): value is number => value !== undefined && value >= 0);
+  const ages = evidence.map(item => item.ageSeconds ?? item.scope?.sourceAgeSeconds).filter((value): value is number => value !== undefined && value >= 0);
   if (!ages.length) return 100;
   const newestAge = Math.min(...ages);
-  if (newestAge <= 3600) return 100;
-  if (newestAge <= 86400) return 85;
-  if (newestAge <= 604800) return 65;
-  return 45;
+  if (newestAge <= 900) return 100;
+  if (newestAge <= 3600) return 90;
+  return 65;
 }
 
 function clamp(value: number): number {

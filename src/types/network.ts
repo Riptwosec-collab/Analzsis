@@ -80,6 +80,10 @@ export interface Evidence {
   text: string;
   sourceFile?: string;
   normalizedText?: string;
+  collectedAt?: string;
+  deviceTimestamp?: string;
+  ageSeconds?: number;
+  freshness?: "Fresh" | "Acceptable" | "Stale" | "Unknown";
   scope?: EvidenceScope;
 }
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createSanitizationPreview, DEFAULT_SANITIZATION_OPTIONS, sanitizeCli } from "@/services/sanitization/sanitizer";
 import { useAnalysisStore } from "@/store/analysis-store";
+import { calculateConfidence } from "@/evidence/confidence-engine";
 
 const CLI_WITH_SENSITIVE_VALUES = [
   "CORE-SW01#show running-config",
@@ -48,5 +49,14 @@ describe("sanitization", () => {
     expect(state.rawCliText).toBe(CLI_WITH_SENSITIVE_VALUES);
     expect(state.sanitizedCliText).not.toBe(CLI_WITH_SENSITIVE_VALUES);
     expect(state.sanitizedCliText).toContain("[REDACTED]");
+  });
+});
+
+describe("evidence freshness", () => {
+  it("uses the 15 and 60 minute confidence thresholds without penalizing unknown time", () => {
+    expect(calculateConfidence({ baseEvidenceStrength: 80, evidence: [{ device: "A", command: "show ip arp", line: 1, text: "x", ageSeconds: 600 }] }).freshness).toBe(100);
+    expect(calculateConfidence({ baseEvidenceStrength: 80, evidence: [{ device: "A", command: "show ip arp", line: 1, text: "x", ageSeconds: 1800 }] }).freshness).toBe(90);
+    expect(calculateConfidence({ baseEvidenceStrength: 80, evidence: [{ device: "A", command: "show ip arp", line: 1, text: "x", ageSeconds: 7200 }] }).freshness).toBe(65);
+    expect(calculateConfidence({ baseEvidenceStrength: 80, evidence: [{ device: "A", command: "show ip arp", line: 1, text: "x" }] }).freshness).toBe(100);
   });
 });
