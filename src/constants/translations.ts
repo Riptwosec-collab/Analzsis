@@ -102,6 +102,28 @@ export const translations = {
       checked: "Checked",
       source: "Source"
     },
+    sanitization: {
+      title: "Sanitization preview",
+      subtitle: "Raw CLI is unchanged. Only the preview, copy, and download output are sanitized.",
+      raw: "Raw CLI used for analysis",
+      sanitized: "Sanitized CLI for sharing",
+      options: "Mask categories",
+      preview: "Refresh preview",
+      copy: "Copy sanitized CLI",
+      download: "Download sanitized CLI",
+      reset: "Reset sanitization",
+      detected: "Sensitive values detected",
+      categories: {
+        credentials: "Passwords and shared keys",
+        snmpCommunity: "SNMP communities",
+        apiToken: "API tokens",
+        email: "Email addresses",
+        publicIp: "Public IP addresses",
+        hostname: "Hostnames",
+        serialNumber: "Serial numbers",
+        macAddress: "MAC addresses"
+      }
+    },
     audit: {
       title: "Verification Summary",
       subtitle: "Only checks supported by the current CLI are summarized. Details stay hidden until selected.",
@@ -264,6 +286,28 @@ export const translations = {
       noRecords: "ไม่พบรายการที่เกี่ยวข้องจาก CLI ที่นำเข้า",
       checked: "ตรวจสอบแล้ว",
       source: "แหล่งตรวจ"
+    },
+    sanitization: {
+      title: "ตัวอย่างข้อมูลที่ปิดบัง",
+      subtitle: "Raw CLI ไม่ถูกแก้ไข ใช้เฉพาะข้อมูลที่ปิดบังสำหรับดูตัวอย่าง คัดลอก และดาวน์โหลด",
+      raw: "Raw CLI ที่ใช้วิเคราะห์",
+      sanitized: "CLI ที่ปิดบังสำหรับแชร์",
+      options: "เลือกประเภทข้อมูลที่ปิดบัง",
+      preview: "สร้างตัวอย่างใหม่",
+      copy: "คัดลอก CLI ที่ปิดบัง",
+      download: "ดาวน์โหลด CLI ที่ปิดบัง",
+      reset: "รีเซ็ตการปิดบัง",
+      detected: "ข้อมูลสำคัญที่ตรวจพบ",
+      categories: {
+        credentials: "Password และ Shared Key",
+        snmpCommunity: "SNMP Community",
+        apiToken: "API Token",
+        email: "Email",
+        publicIp: "Public IP",
+        hostname: "Hostname",
+        serialNumber: "Serial Number",
+        macAddress: "MAC Address"
+      }
     },
     audit: {
       title: "สรุปการตรวจสอบ",

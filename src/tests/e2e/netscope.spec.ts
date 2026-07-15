@@ -11,6 +11,25 @@ test("loads demo data and renders dashboard", async ({ page }) => {
   await expect(page.getByText("\u0e2d\u0e38\u0e1b\u0e01\u0e23\u0e13\u0e4c\u0e41\u0e25\u0e30 Interface")).toBeVisible();
 });
 
+test("previews sanitized CLI without changing the raw text used for analysis", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("select[aria-label]").first().selectOption("en");
+  await page.getByRole("button", { name: "Load Demo" }).click();
+  const editor = page.getByRole("textbox", { name: "Paste Router / Switch / Firewall Output" });
+  const rawCli = await editor.inputValue();
+
+  await page.getByRole("button", { name: "Mask Sensitive Data" }).click();
+  const dialog = page.getByRole("dialog", { name: "Sanitization preview" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Raw CLI used for analysis")).toBeVisible();
+  await expect(dialog.getByText("Sanitized CLI for sharing")).toBeVisible();
+  await page.getByRole("button", { name: "Close details" }).click();
+
+  await expect(editor).toHaveValue(rawCli);
+  await page.getByRole("button", { name: "Analyze" }).click();
+  await expect(page.getByText("Verification Summary")).toBeVisible();
+});
+
 test("keeps verification details collapsed until the selected check is opened", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "\u0e42\u0e2b\u0e25\u0e14\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07" }).click();

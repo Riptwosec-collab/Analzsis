@@ -30,12 +30,13 @@ import { SAMPLE_DATA } from "@/constants/sample-data";
 import { type Language, translations } from "@/constants/translations";
 import { analyzeCli } from "@/parsers";
 import { exportExcel, exportJson, exportMarkdown, exportPdf } from "@/services/export/report-export";
-import { sanitizeCli, scanSensitiveData } from "@/services/sanitization/sanitizer";
+import { createSanitizationPreview, DEFAULT_SANITIZATION_OPTIONS, type SanitizationOptions } from "@/services/sanitization/sanitizer";
 import { useAnalysisStore } from "@/store/analysis-store";
 import type { AnalysisResult, Finding, IpInventoryRecord, SecurityCheck, Severity } from "@/types/network";
 import { scopeFromEvidence, scopeKey } from "@/evidence/evidence-scope";
 import { ipInSubnet, ipToNumber } from "@/utils/ip";
 import { AuditModal } from "@/components/audit-modal";
+import { SanitizationDialog } from "@/components/sanitization-dialog";
 import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
 import { SubnetCheckDetails } from "@/components/subnet-check-details";
 import { Badge } from "@/components/ui/badge";
@@ -92,24 +93,32 @@ const recommendedCollection = [
 
 export function NetScopeApp({ initialView }: { initialView: ViewId }) {
   const { theme, setTheme } = useTheme();
-  const { cliText, result, progress, setCliText, setResult, setProgress, clear } = useAnalysisStore();
+  const { rawCliText, sanitizedCliText, result, progressMessage, progressPercent, setRawCliText, generateSanitizedText, resetSanitization, startAnalysis, setProgress, setResult, setError, clearSession } = useAnalysisStore();
   const [activeView, setActiveView] = useState<ViewId>(initialView);
   const [language, setLanguage] = useState<Language>("th");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [metricFocus, setMetricFocus] = useState<MetricFocus | null>(null);
+  const [sanitizationOpen, setSanitizationOpen] = useState(false);
+  const [sanitizationOptions, setSanitizationOptions] = useState<SanitizationOptions>(DEFAULT_SANITIZATION_OPTIONS);
   const t = translations[language];
-  const sensitiveHits = useMemo(() => scanSensitiveData(cliText), [cliText]);
-  const preview = useMemo(() => buildPreview(cliText), [cliText]);
+  const sanitizationPreview = useMemo(() => createSanitizationPreview(rawCliText, sanitizationOptions), [rawCliText, sanitizationOptions]);
+  const sensitiveHits = sanitizationPreview.hits;
+  const preview = useMemo(() => buildPreview(rawCliText), [rawCliText]);
   const criticalCount = result?.findings.filter(finding => finding.severity === "Critical").length ?? 0;
 
   async function analyze() {
-    if (!cliText.trim()) return;
+    if (!rawCliText.trim()) return;
     setBusy(true);
-    setProgress(t.uploadMode);
+    startAnalysis();
     try {
-      setResult(await runAnalysis(cliText));
+      setProgress("detecting", 20, "Detecting command blocks");
+      const nextResult = await runAnalysis(rawCliText);
+      setProgress("correlating", 80, "Correlating IP, MAC, DHCP, and security evidence");
+      setResult(nextResult);
       if (activeView === "import") setActiveView("overview");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Analysis failed");
     } finally {
       setBusy(false);
     }
@@ -132,21 +141,25 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
             setLanguage={setLanguage}
             theme={theme}
             setTheme={setTheme}
-            onLoadSample={() => setCliText(SAMPLE_DATA)}
+            onLoadSample={() => setRawCliText(SAMPLE_DATA)}
           />
 
           <StatusPills t={t} result={result} preview={preview} />
 
           <AnalyzerPanel
             t={t}
-            cliText={cliText}
-            setCliText={setCliText}
+            cliText={rawCliText}
+            setCliText={setRawCliText}
             busy={busy}
             analyze={analyze}
-            clear={clear}
+            clear={clearSession}
             sensitiveHits={sensitiveHits}
-            progress={progress}
+            progress={`${progressPercent}% · ${progressMessage}`}
             preview={preview}
+            onSanitize={() => {
+              generateSanitizedText(sanitizationOptions);
+              setSanitizationOpen(true);
+            }}
             onRecommended={() => {
               setMetricFocus(null);
               setActiveView("troubleshooting");
@@ -154,6 +167,22 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
             onExport={() => {
               setMetricFocus(null);
               setActiveView("reports");
+            }}
+          />
+
+          <SanitizationDialog
+            open={sanitizationOpen}
+            onClose={() => setSanitizationOpen(false)}
+            rawCliText={rawCliText}
+            sanitizedCliText={sanitizedCliText}
+            preview={sanitizationPreview}
+            options={sanitizationOptions}
+            labels={t.sanitization}
+            onOptionsChange={setSanitizationOptions}
+            onGenerate={() => generateSanitizedText(sanitizationOptions)}
+            onReset={() => {
+              resetSanitization();
+              setSanitizationOptions(DEFAULT_SANITIZATION_OPTIONS);
             }}
           />
 
@@ -177,7 +206,7 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
           <section id="analysis-detail" className="rounded-[1.35rem] border border-cyan-400/30 bg-[#031128]/80 p-3 shadow-[0_0_42px_rgba(0,217,255,0.16)]">
             {!result && activeView !== "import" ? <EmptyState t={t} onOpenImport={() => setActiveView("import")} /> : null}
             {activeView === "import" ? (
-              <ImportDetails t={t} result={result} sensitiveHits={sensitiveHits} progress={progress} />
+              <ImportDetails t={t} result={result} sensitiveHits={sensitiveHits} progress={`${progressPercent}% · ${progressMessage}`} />
             ) : null}
             {result && activeView !== "import" ? (
               metricFocus
@@ -283,7 +312,8 @@ function AnalyzerPanel({
   progress,
   preview,
   onRecommended,
-  onExport
+  onExport,
+  onSanitize
 }: {
   t: Copy;
   cliText: string;
@@ -296,6 +326,7 @@ function AnalyzerPanel({
   preview: Preview;
   onRecommended: () => void;
   onExport: () => void;
+  onSanitize: () => void;
 }) {
   return (
     <Card className="cyber-border-energy cyber-light-sweep rounded-[1.35rem]">
@@ -328,7 +359,7 @@ function AnalyzerPanel({
             <ClipboardList className="h-4 w-4" />
             {t.loadSample}
           </Button>
-          <Button variant="outline" onClick={() => setCliText(sanitizeCli(cliText, "mask"))}>
+          <Button variant="outline" onClick={onSanitize} disabled={!cliText.trim()}>
             <ShieldAlert className="h-4 w-4" />
             {t.sanitize}
           </Button>
