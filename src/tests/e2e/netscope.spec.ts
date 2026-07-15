@@ -30,6 +30,18 @@ test("previews sanitized CLI without changing the raw text used for analysis", a
   await expect(page.getByText("Verification Summary")).toBeVisible();
 });
 
+test("shows collection commands missing from the current CLI only", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("select[aria-label]").first().selectOption("en");
+  await page.getByRole("button", { name: "Load Demo" }).click();
+  await page.getByRole("button", { name: "Analyze" }).click();
+  await page.getByRole("button", { name: "Recommended Commands" }).click();
+  await expect(page.getByText("Collection profiles")).toBeVisible();
+  await page.getByRole("combobox", { name: "Collection profile" }).selectOption("duplicate-ip");
+  await expect(page.getByRole("cell", { name: "show ip arp" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "show ip dhcp conflict" })).toBeVisible();
+});
+
 test("keeps verification details collapsed until the selected check is opened", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "\u0e42\u0e2b\u0e25\u0e14\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07" }).click();

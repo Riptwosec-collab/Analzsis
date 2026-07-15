@@ -124,6 +124,18 @@ export const translations = {
         macAddress: "MAC addresses"
       }
     },
+    collection: {
+      title: "Collection profiles",
+      subtitle: "Choose an incident to copy read-only commands and see what evidence is missing from this import.",
+      profile: "Collection profile",
+      copyAll: "Copy all commands",
+      copyMissing: "Copy missing commands",
+      command: "Command",
+      reason: "Reason",
+      state: "State",
+      missing: "Missing",
+      collected: "Collected"
+    },
     audit: {
       title: "Verification Summary",
       subtitle: "Only checks supported by the current CLI are summarized. Details stay hidden until selected.",
@@ -308,6 +320,18 @@ export const translations = {
         serialNumber: "Serial Number",
         macAddress: "MAC Address"
       }
+    },
+    collection: {
+      title: "ชุดคำสั่งสำหรับเก็บข้อมูล",
+      subtitle: "เลือกอาการเพื่อคัดลอกคำสั่งตรวจแบบ read-only และดูหลักฐานที่ยังขาดจาก import นี้",
+      profile: "ชุดคำสั่ง",
+      copyAll: "คัดลอกทุกคำสั่ง",
+      copyMissing: "คัดลอกคำสั่งที่ยังขาด",
+      command: "คำสั่ง",
+      reason: "เหตุผล",
+      state: "สถานะ",
+      missing: "ยังไม่พบ",
+      collected: "เก็บแล้ว"
     },
     audit: {
       title: "สรุปการตรวจสอบ",

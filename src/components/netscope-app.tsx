@@ -37,6 +37,7 @@ import { scopeFromEvidence, scopeKey } from "@/evidence/evidence-scope";
 import { ipInSubnet, ipToNumber } from "@/utils/ip";
 import { AuditModal } from "@/components/audit-modal";
 import { SanitizationDialog } from "@/components/sanitization-dialog";
+import { CollectionProfilePanel } from "@/features/troubleshooting/collection-profile-panel";
 import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
 import { SubnetCheckDetails } from "@/components/subnet-check-details";
 import { Badge } from "@/components/ui/badge";
@@ -1555,13 +1556,16 @@ function Topology({ result, t }: { result: AnalysisResult; t: Copy }) {
 
 function Troubleshooting({ result, t }: { result: AnalysisResult; t: Copy }) {
   return (
-    <Card>
+    <div className="space-y-4">
+      <CollectionProfilePanel result={result} language={isThaiCopy(t) ? "th" : "en"} />
+      <Card>
       <CardHeader><CardTitle>{t.tabs.troubleshooting}</CardTitle><CardDescription>{t.panels.troubleshooting}</CardDescription></CardHeader>
       <CardContent>
         <pre className="overflow-auto rounded-md bg-muted p-4 text-sm">{result.recommendedCommands.join("\n") || t.states.noCommands}</pre>
         <Button className="mt-3" variant="outline" onClick={() => navigator.clipboard.writeText(result.recommendedCommands.join("\n"))}>{t.actions.copyCommands}</Button>
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 }
 
