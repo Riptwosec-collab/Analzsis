@@ -1,4 +1,5 @@
 import type { Finding, ParsedDataset } from "@/types/network";
+import { scopeFromEvidence, scopeKey } from "@/evidence/evidence-scope";
 import { ipInSubnet } from "@/utils/ip";
 
 export function findConfigurationFindings(dataset: ParsedDataset): Finding[] {
@@ -7,8 +8,84 @@ export function findConfigurationFindings(dataset: ParsedDataset): Finding[] {
     ...findDuplicateDhcpIdentifiers(dataset),
     ...findDuplicateDhcpHosts(dataset),
     ...findDhcpGatewayMismatches(dataset),
+    ...findOverlappingDynamicDhcpPools(dataset),
+    ...findReservationsInsideDynamicPools(dataset),
+    ...findConfigurationSecurityRisks(dataset),
     ...findParserCoverageIssue(dataset)
   ];
+}
+
+function findConfigurationSecurityRisks(dataset: ParsedDataset): Finding[] {
+  const findings: Finding[] = [];
+  for (const block of dataset.commandBlocks.filter(item => item.command === "show running-config")) {
+    const scope = block.device;
+    const lines = block.lines;
+    const evidenceFor = (pattern: RegExp, redact = false) => lines
+      .filter(line => pattern.test(line.text.trim()))
+      .map(line => redact ? { ...line, text: redactSensitiveConfig(line.text) } : line);
+    const add = (id: string, severity: Finding["severity"], title: string, description: string, recommendation: string, evidence: Finding["evidence"], verificationCommands: string[]) => {
+      if (!evidence.length) return;
+      findings.push({ id: `${id}-${block.id}`, severity, category: "Security", title, target: scope, description, confidence: 96, evidence, recommendation, verificationCommands });
+    };
+
+    add(
+      "snmp-rw-community",
+      "High",
+      "SNMP read-write community configured",
+      `Device ${scope} has an SNMP v1/v2c read-write community. The community value is masked in this result because it is sensitive.`,
+      "Restrict the source ACL, prefer SNMPv3 authPriv, and remove read-write access unless a documented management workflow requires it.",
+      evidenceFor(/^snmp-server community\s+\S+\s+RW\b/i, true),
+      ["show running-config | include ^snmp-server community", "show snmp group", "show snmp user"]
+    );
+    add(
+      "http-management",
+      "Medium",
+      "Unencrypted HTTP management enabled",
+      `Device ${scope} enables the IOS HTTP management server. This review does not apply to HTTPS-only configuration.`,
+      "Disable cleartext HTTP management or restrict it to a dedicated management network and use HTTPS with an approved certificate.",
+      evidenceFor(/^ip http server$/i),
+      ["show running-config | include ^ip http", "show ip http server session-module"]
+    );
+    add(
+      "telnet-vty",
+      "High",
+      "Telnet is permitted on management lines",
+      `Device ${scope} permits Telnet on a console or VTY management line, which exposes credentials and session traffic in cleartext.`,
+      "Restrict management transport to SSH and confirm that an alternate management path is available before removing Telnet.",
+      evidenceFor(/^transport input\s+(?:.*\btelnet\b.*|all)$/i),
+      ["show running-config | section ^line vty", "show ip ssh", "show users"]
+    );
+    add(
+      "acl-permit-any-any",
+      "Low",
+      "Access list contains permit ip any any",
+      `Device ${scope} has an IPv4 ACL entry that permits all IPv4 traffic. This is a review item; the effective risk depends on interface direction and attachment.`,
+      "Check where the ACL is applied, its sequence, and preceding deny statements before changing policy.",
+      evidenceFor(/^(?:\d+\s+)?permit\s+ip\s+any\s+any$/i),
+      ["show ip access-lists", "show running-config | include ip access-group", "show running-config | section ^interface"]
+    );
+    const snoopingEvidence = evidenceFor(/^ip dhcp snooping(?:\s|$)/i);
+    const snoopingTrust = evidenceFor(/^ip dhcp snooping trust$/i);
+    if (snoopingEvidence.length && !snoopingTrust.length) {
+      findings.push({
+        id: `dhcp-snooping-no-trusted-port-${block.id}`,
+        severity: "Medium",
+        category: "Security",
+        title: "DHCP Snooping has no configured trusted port",
+        target: scope,
+        description: `Device ${scope} enables DHCP Snooping but the imported configuration contains no ip dhcp snooping trust statement. This may be intentional only when DHCP traffic does not traverse this device.`,
+        confidence: 82,
+        evidence: snoopingEvidence,
+        recommendation: "Confirm the DHCP server/uplink path and mark only the required uplink or server-facing ports as trusted.",
+        verificationCommands: ["show ip dhcp snooping", "show running-config | include ip dhcp snooping trust", "show interfaces trunk"]
+      });
+    }
+  }
+  return findings;
+}
+
+function redactSensitiveConfig(text: string): string {
+  return text.replace(/^(snmp-server community)\s+\S+(.*)$/i, "$1 [REDACTED]$2");
 }
 
 function findIncompleteDhcpPools(dataset: ParsedDataset): Finding[] {
@@ -35,13 +112,15 @@ function findDuplicateDhcpIdentifiers(dataset: ParsedDataset): Finding[] {
   for (const pool of dataset.dhcpPools) {
     const identifier = pool.clientIdentifier ?? pool.hardwareAddress;
     if (!identifier) continue;
-    const list = map.get(identifier) ?? [];
+    const key = `${scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf }))}|${identifier}`;
+    const list = map.get(key) ?? [];
     list.push(pool);
-    map.set(identifier, list);
+    map.set(key, list);
   }
 
-  return [...map.entries()].flatMap(([identifier, pools], index): Finding[] => {
+  return [...map.entries()].flatMap(([key, pools], index): Finding[] => {
     if (pools.length < 2) return [];
+    const identifier = pools[0].clientIdentifier ?? pools[0].hardwareAddress ?? key;
     const targets = pools.map(pool => pool.host ?? pool.network ?? pool.name);
     return [{
       id: `dhcp-duplicate-client-${index}`,
@@ -66,13 +145,15 @@ function findDuplicateDhcpHosts(dataset: ParsedDataset): Finding[] {
   const map = new Map<string, typeof dataset.dhcpPools>();
   for (const pool of dataset.dhcpPools) {
     if (!pool.host) continue;
-    const list = map.get(pool.host) ?? [];
+    const key = `${scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf }))}|${pool.host}`;
+    const list = map.get(key) ?? [];
     list.push(pool);
-    map.set(pool.host, list);
+    map.set(key, list);
   }
 
-  return [...map.entries()].flatMap(([host, pools], index): Finding[] => {
+  return [...map.entries()].flatMap(([key, pools], index): Finding[] => {
     if (pools.length < 2) return [];
+    const host = pools[0].host ?? key;
     return [{
       id: `dhcp-duplicate-host-${index}`,
       severity: "Critical",
@@ -85,6 +166,64 @@ function findDuplicateDhcpHosts(dataset: ParsedDataset): Finding[] {
       recommendation: "Keep one authoritative reservation and remove or correct duplicate pool definitions after validating the endpoint owner.",
       verificationCommands: [`show running-config | include ${host}`, "show ip dhcp binding", `show ip arp ${host}`]
     }];
+  });
+}
+
+function findOverlappingDynamicDhcpPools(dataset: ParsedDataset): Finding[] {
+  const pools = dataset.dhcpPools.filter(pool => pool.poolType === "Dynamic" && pool.network && pool.prefix !== undefined);
+  const findings: Finding[] = [];
+  for (let leftIndex = 0; leftIndex < pools.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < pools.length; rightIndex += 1) {
+      const left = pools[leftIndex];
+      const right = pools[rightIndex];
+      if (!left.network || left.prefix === undefined || !right.network || right.prefix === undefined) continue;
+      if (scopeKey(scopeFromEvidence(left.evidence, { vrf: left.vrf })) !== scopeKey(scopeFromEvidence(right.evidence, { vrf: right.vrf }))) continue;
+      if (!ipInSubnet(left.network, right.network, right.prefix) && !ipInSubnet(right.network, left.network, left.prefix)) continue;
+      findings.push({
+        id: `dhcp-overlap-${leftIndex}-${rightIndex}`,
+        severity: "Critical",
+        category: "DHCP",
+        title: "Dynamic DHCP pools overlap",
+        target: `${left.name} / ${right.name}`,
+        description: `${left.name} (${left.network}/${left.prefix}) and ${right.name} (${right.network}/${right.prefix}) overlap in the same device and VRF scope.`,
+        confidence: 100,
+        evidence: [...left.evidence, ...right.evidence],
+        recommendation: "Confirm the intended address boundaries and keep non-overlapping dynamic scopes before changing either DHCP pool.",
+        verificationCommands: ["show running-config | section ^ip dhcp pool", "show ip dhcp pool", "show ip dhcp binding"]
+      });
+    }
+  }
+  return findings;
+}
+
+function findReservationsInsideDynamicPools(dataset: ParsedDataset): Finding[] {
+  const dynamicPools = dataset.dhcpPools.filter(pool => pool.poolType === "Dynamic" && pool.network && pool.prefix !== undefined);
+  const grouped = new Map<string, { pool: typeof dynamicPools[number]; reservations: typeof dataset.dhcpPools }>();
+  for (const reservation of dataset.dhcpPools) {
+    if (reservation.poolType !== "Reservation" || !reservation.host) continue;
+    const scope = scopeKey(scopeFromEvidence(reservation.evidence, { vrf: reservation.vrf }));
+    const pool = dynamicPools.find(item => item.network && item.prefix !== undefined && scopeKey(scopeFromEvidence(item.evidence, { vrf: item.vrf })) === scope && ipInSubnet(reservation.host!, item.network, item.prefix));
+    if (!pool) continue;
+    const key = `${scope}|${pool.name}`;
+    const current = grouped.get(key) ?? { pool, reservations: [] };
+    current.reservations.push(reservation);
+    grouped.set(key, current);
+  }
+
+  return [...grouped.values()].map(({ pool, reservations }, index): Finding => {
+    const addresses = reservations.map(item => item.host).filter((item): item is string => Boolean(item));
+    return {
+      id: `dhcp-reservation-in-dynamic-${index}`,
+      severity: "Medium",
+      category: "DHCP",
+      title: "DHCP reservation is inside a dynamic pool",
+      target: pool.name,
+      description: `${reservations.length} reservation(s) (${addresses.slice(0, 12).join(", ")}${addresses.length > 12 ? ", ..." : ""}) fall inside dynamic pool ${pool.name} (${pool.network}/${pool.prefix}). This is a configuration review item, not a confirmed allocation collision.`,
+      confidence: 75,
+      evidence: [...pool.evidence, ...reservations.flatMap(item => item.evidence)],
+      recommendation: "Verify the platform's reservation behavior and confirm that dynamic allocation cannot assign these addresses to a different client before changing the range.",
+      verificationCommands: ["show running-config | section ^ip dhcp pool", "show ip dhcp binding", "show ip dhcp pool"]
+    };
   });
 }
 

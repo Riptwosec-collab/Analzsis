@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { useAnalysisStore } from "@/store/analysis-store";
 import type { AnalysisResult, Finding, IpInventoryRecord, Severity } from "@/types/network";
+import { normalizeVrf, scopeFromEvidence } from "@/evidence/evidence-scope";
 import { ipInSubnet, ipToNumber } from "@/utils/ip";
 
 interface IpMacCheckDetailsProps {
@@ -55,9 +56,6 @@ export function IpMacCheckDetails({ row, language }: IpMacCheckDetailsProps) {
               <Badge severity={badgeSeverity(check.state)}>{stateLabel(check.state, language)}</Badge>
             </div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">{check.detail}</p>
-            <div className="mt-2 text-[11px] text-cyan-100/70">
-              {language === "th" ? "แหล่งตรวจ:" : "Checked from:"} {check.sources.join(", ") || "-"}
-            </div>
           </article>
         ))}
       </div>
@@ -72,10 +70,6 @@ export function IpMacCheckDetails({ row, language }: IpMacCheckDetailsProps) {
             <dd>{row.descriptionSource ?? "Unknown"}{row.descriptionConfidence !== undefined ? ` · ${row.descriptionConfidence}%` : ""}</dd>
             <dt className="text-muted-foreground">{language === "th" ? "เหตุผลการจัดประเภท" : "Classification reason"}</dt>
             <dd>{classificationReasonText(row, language)}</dd>
-            <dt className="text-muted-foreground">{language === "th" ? "หลักฐานที่ตรวจแล้ว" : "Checked sources"}</dt>
-            <dd>{row.checkedSources?.join(", ") || "-"}</dd>
-            <dt className="text-muted-foreground">{language === "th" ? "หลักฐานที่ยังขาด" : "Missing sources"}</dt>
-            <dd>{row.missingSources?.join(", ") || "-"}</dd>
             <dt className="text-muted-foreground">{language === "th" ? "DHCP Pool ที่เกี่ยวข้อง" : "Related DHCP pools"}</dt>
             <dd>{row.relatedPoolNames?.join(", ") || "-"}</dd>
             <dt className="text-muted-foreground">Subnet</dt>
@@ -140,30 +134,48 @@ export function IpMacCheckDetails({ row, language }: IpMacCheckDetailsProps) {
           {model.evidenceLines.join("\n") || (language === "th" ? "ไม่มีบรรทัดหลักฐานโดยตรง" : "No direct evidence lines")}
         </pre>
       </div>
+
+      <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75">
+        <span className="font-medium text-cyan-50">{language === "th" ? "แหล่งตรวจ:" : "Sources checked:"}</span>{" "}
+        {model.sources.join(", ") || "-"}
+        {row.missingSources?.length ? (
+          <span className="text-muted-foreground"> {language === "th" ? `· หลักฐานที่ยังขาด: ${row.missingSources.join(", ")}` : `· Missing evidence: ${row.missingSources.join(", ")}`}</span>
+        ) : null}
+      </div>
     </section>
   );
 }
 
 function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, language: "en" | "th") {
-  const arpMatches = result.arp.filter(item => item.ip === row.ip || Boolean(item.mac && row.macs.includes(item.mac)));
-  const dhcpBindings = result.dhcpBindings.filter(item => item.ip === row.ip || Boolean(item.mac && row.macs.includes(item.mac)));
-  const reservationPools = result.dhcpPools.filter(pool => pool.host === row.ip || Boolean(pool.hardwareAddress && row.macs.includes(pool.hardwareAddress)));
-  const networkPools = result.dhcpPools.filter(pool => pool.network && pool.prefix !== undefined && ipInSubnet(row.ip, pool.network, pool.prefix));
-  const excludedRanges = result.dhcpExcludedRanges.filter(range => ipInRange(row.ip, range.startIp, range.endIp));
-  const dhcpConflicts = result.dhcpConflicts.filter(item => item.ip === row.ip);
-  const macRows = result.macTable.filter(item => row.macs.includes(item.mac));
-  const interfaces = result.interfaces.filter(item => item.ip === row.ip || row.ports.includes(item.name) || arpMatches.some(arp => arp.interfaceName === item.name));
-  const subnets = result.subnets.filter(subnet => ipInSubnet(row.ip, subnet.network, subnet.prefix));
+  const recordScope = (evidence: IpInventoryRecord["evidence"], ip?: string, vrf?: string) => {
+    const scope = scopeFromEvidence(evidence, { vrf });
+    if (vrf || !ip) return scope;
+    const candidates = result.subnets.filter(subnet => subnet.deviceId === scope.deviceId && ipInSubnet(ip, subnet.network, subnet.prefix));
+    return candidates.length === 1 ? scopeFromEvidence(evidence, { vrf: candidates[0].vrf }) : scope;
+  };
+  const inRowScope = (evidence: IpInventoryRecord["evidence"], ip?: string, vrf?: string) => {
+    const scope = recordScope(evidence, ip, vrf);
+    return scope.deviceId === row.deviceId && normalizeVrf(scope.vrf) === row.vrf;
+  };
+  const arpMatches = result.arp.filter(item => inRowScope(item.evidence, item.ip, item.vrf) && (item.ip === row.ip || Boolean(item.mac && row.macs.includes(item.mac))));
+  const dhcpBindings = result.dhcpBindings.filter(item => inRowScope(item.evidence, item.ip, item.vrf) && (item.ip === row.ip || Boolean(item.mac && row.macs.includes(item.mac))));
+  const reservationPools = result.dhcpPools.filter(pool => inRowScope(pool.evidence, pool.host ?? pool.network, pool.vrf) && (pool.host === row.ip || Boolean(pool.hardwareAddress && row.macs.includes(pool.hardwareAddress))));
+  const networkPools = result.dhcpPools.filter(pool => inRowScope(pool.evidence, pool.network, pool.vrf) && pool.network && pool.prefix !== undefined && ipInSubnet(row.ip, pool.network, pool.prefix));
+  const excludedRanges = result.dhcpExcludedRanges.filter(range => inRowScope(range.evidence, range.startIp, range.vrf) && ipInRange(row.ip, range.startIp, range.endIp));
+  const dhcpConflicts = result.dhcpConflicts.filter(item => inRowScope(item.evidence, item.ip, item.vrf) && item.ip === row.ip);
+  const macRows = result.macTable.filter(item => inRowScope(item.evidence) && row.macs.includes(item.mac));
+  const interfaces = result.interfaces.filter(item => inRowScope(item.evidence, item.ip, item.vrf) && (item.ip === row.ip || row.ports.includes(item.name) || arpMatches.some(arp => arp.interfaceName === item.name)));
+  const subnets = result.subnets.filter(subnet => subnet.deviceId === row.deviceId && subnet.vrf === row.vrf && ipInSubnet(row.ip, subnet.network, subnet.prefix));
   const relatedFindings = [...result.findings, ...result.blockedDevices]
-    .filter(finding => findingRelatesToRow(finding, row))
+    .filter(finding => findingRelatesToRow(finding, row) && finding.evidence.some(item => inRowScope([item], row.ip)))
     .filter((finding, index, all) => all.findIndex(candidate => candidate.id === finding.id) === index);
-  const relatedLogs = result.logs.filter(log => log.ip === row.ip || Boolean(log.mac && row.macs.includes(log.mac)));
+  const relatedLogs = result.logs.filter(log => inRowScope(log.evidence, log.ip) && (log.ip === row.ip || Boolean(log.mac && row.macs.includes(log.mac))));
 
-  const hasArpCommand = commandAvailable(result, ["show ip arp", "show arp"]);
-  const hasDhcpCommand = commandAvailable(result, ["show ip dhcp binding", "show ip dhcp snooping binding", "show ip source binding", "show running-config"]);
-  const hasMacCommand = commandAvailable(result, ["show mac address-table"]);
-  const hasInterfaceCommand = commandAvailable(result, ["show interfaces status", "show interfaces description", "show interfaces switchport", "show interfaces trunk", "show ip interface brief", "show running-config"]);
-  const hasLogCommand = commandAvailable(result, ["show logging", "show running-config"]);
+  const hasArpCommand = commandAvailable(result, ["show ip arp", "show arp"], row.deviceId);
+  const hasDhcpCommand = commandAvailable(result, ["show ip dhcp binding", "show ip dhcp snooping binding", "show ip source binding", "show running-config"], row.deviceId);
+  const hasMacCommand = commandAvailable(result, ["show mac address-table"], row.deviceId);
+  const hasInterfaceCommand = commandAvailable(result, ["show interfaces status", "show interfaces description", "show interfaces switchport", "show interfaces trunk", "show ip interface brief", "show running-config"], row.deviceId);
+  const hasLogCommand = commandAvailable(result, ["show logging", "show running-config"], row.deviceId);
 
   const vlanMismatch = hasSetMismatch(
     arpMatches.map(item => item.vlan).filter((value): value is number => value !== undefined),
@@ -177,7 +189,7 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
   const blockedFinding = relatedFindings.some(finding => /block|deny|err.?disabled|violation|quarantine|rejection/i.test(`${finding.title} ${finding.description}`)) || relatedLogs.length > 0;
   const mismatchDetails = arpMatches.flatMap(arp => {
     if (!arp.mac) return [];
-    const rows = result.macTable.filter(mac => mac.mac === arp.mac);
+    const rows = result.macTable.filter(mac => inRowScope(mac.evidence) && mac.mac === arp.mac);
     return rows
       .filter(mac => (arp.vlan !== undefined && mac.vlan !== undefined && arp.vlan !== mac.vlan) || (arp.interfaceName && mac.port !== arp.interfaceName))
       .map(mac => ({
@@ -269,10 +281,10 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
   ];
 
   const macDetails = row.macs.map(mac => {
-    const macTableRows = result.macTable.filter(item => item.mac === mac);
-    const macDhcp = result.dhcpBindings.filter(item => item.mac === mac);
-    const macArp = result.arp.filter(item => item.mac === mac);
-    const macFindings = [...result.findings, ...result.blockedDevices].filter(finding => findingRelatesToMac(finding, mac));
+    const macTableRows = result.macTable.filter(item => inRowScope(item.evidence) && item.mac === mac);
+    const macDhcp = result.dhcpBindings.filter(item => inRowScope(item.evidence, item.ip, item.vrf) && item.mac === mac);
+    const macArp = result.arp.filter(item => inRowScope(item.evidence, item.ip, item.vrf) && item.mac === mac);
+    const macFindings = [...result.findings, ...result.blockedDevices].filter(finding => findingRelatesToMac(finding, mac) && finding.evidence.some(item => inRowScope([item], row.ip)));
     return {
       mac,
       vlans: unique([...macTableRows.map(item => item.vlan), ...macArp.map(item => item.vlan)].filter((value): value is number => value !== undefined).map(String)),
@@ -322,7 +334,11 @@ function buildCheckModel(row: IpInventoryRecord, result: AnalysisResult, languag
     interfaceSummary: interfaces.map(item => item.name).join(", ") || "-",
     relatedFindings,
     macDetails,
-    evidenceLines
+    evidenceLines,
+    sources: unique([
+      ...row.checkedSources ?? [],
+      ...checks.flatMap(check => check.sources)
+    ])
   };
 }
 
@@ -449,8 +465,8 @@ function commandCheck(id: string, title: string, collected: boolean, matches: nu
   };
 }
 
-function commandAvailable(result: AnalysisResult, commands: string[]): boolean {
-  return result.commandBlocks.some(block => commands.includes(block.command) && block.parsed);
+function commandAvailable(result: AnalysisResult, commands: string[], deviceId: string): boolean {
+  return result.commandBlocks.some(block => block.device === deviceId && commands.includes(block.command) && block.parsed);
 }
 
 function findingRelatesToRow(finding: Finding, row: IpInventoryRecord): boolean {

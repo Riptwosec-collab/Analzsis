@@ -62,6 +62,7 @@ src/
 
     tables/
       data-table.tsx
+      record-table.tsx
       data-table-toolbar.tsx
       column-selector.tsx
       table-pagination.tsx

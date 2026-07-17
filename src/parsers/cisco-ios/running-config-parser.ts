@@ -1,4 +1,4 @@
-import type { CommandBlock, ConfigFeatureCategory, DhcpExcludedRangeRecord, DhcpPoolRecord, InterfaceRecord, ParsedDataset, VrfRecord } from "@/types/network";
+import type { AccessListRecord, CommandBlock, ConfigFeatureCategory, DhcpExcludedRangeRecord, DhcpPoolRecord, InterfaceRecord, ParsedDataset, VrfRecord } from "@/types/network";
 import { makeEvidence } from "@/parsers/detector/command-detector";
 import { maskToPrefix } from "@/utils/ip";
 import { normalizeInterface } from "@/utils/interface";
@@ -9,6 +9,7 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
   let currentPool: DhcpPoolRecord | null = null;
   let currentInterface: InterfaceRecord | null = null;
   let currentVrf: VrfRecord | null = null;
+  let currentNamedAcl: Pick<AccessListRecord, "name" | "family" | "aclType"> | null = null;
   let hostname = block.device;
   let version: string | undefined;
   let model: string | undefined;
@@ -76,20 +77,29 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
     const poolStart = text.match(/^ip dhcp pool\s+(.+)$/i);
     const interfaceStart = text.match(/^interface\s+(.+)$/i);
     const vrfStart = text.match(/^vrf definition\s+(.+)$/i);
+    const namedAclStart = text.match(/^ip access-list\s+(standard|extended)\s+(\S+)/i);
 
-    if (poolStart) {
+    if (namedAclStart) {
       finishPool(); finishInterface(); finishVrf();
-      currentPool = { name: poolStart[1].trim(), defaultRouters: [], dnsServers: [], evidence: [evidence] };
+      currentNamedAcl = { name: namedAclStart[2], family: "ipv4", aclType: "named" };
+      addFeature(dataset, "Security", "Access List", namedAclStart[2], namedAclStart[2], evidence);
+      hit = true;
+    } else if (poolStart) {
+      finishPool(); finishInterface(); finishVrf();
+      currentNamedAcl = null;
+      currentPool = { name: poolStart[1].trim(), defaultRouters: [], dnsServers: [], options: [], evidence: [evidence] };
       addFeature(dataset, "DHCP", "DHCP Pool", poolStart[1].trim(), poolStart[1].trim(), evidence);
       hit = true;
     } else if (interfaceStart) {
       finishPool(); finishInterface(); finishVrf();
+      currentNamedAcl = null;
       const name = normalizeInterface(interfaceStart[1]) ?? interfaceStart[1].trim();
-      currentInterface = { name, vlan: parseVlanId(name), mode: /^(Vlan|Loopback|Tunnel)/i.test(name) ? "routed" : "unknown", shutdown: false, servicePolicies: [], evidence: [evidence] };
+      currentInterface = { name, vlan: parseVlanId(name), mode: /^(Vlan|Loopback|Tunnel)/i.test(name) ? "routed" : "unknown", shutdown: false, servicePolicies: [], helperAddresses: [], evidence: [evidence] };
       addFeature(dataset, "Interface", "Interface", name, name, evidence);
       hit = true;
     } else if (vrfStart) {
       finishPool(); finishInterface(); finishVrf();
+      currentNamedAcl = null;
       currentVrf = { name: vrfStart[1].trim(), addressFamilies: [], interfaces: [], evidence: [evidence] };
       addFeature(dataset, "Routing", "VRF", vrfStart[1].trim(), vrfStart[1].trim(), evidence);
       routing = true;
@@ -103,6 +113,9 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
       const hardware = text.match(/^hardware-address\s+(\S+)/i);
       const router = text.match(/^default-router\s+(.+)/i);
       const dns = text.match(/^dns-server\s+(.+)/i);
+      const domain = text.match(/^domain-name\s+(.+)/i);
+      const lease = text.match(/^lease\s+(.+)/i);
+      const option = text.match(/^option\s+(\d+)\s+(?:(ascii|hex|ip)\s+)?(.+)/i);
       if (network) {
         currentPool.network = network[1]; currentPool.prefix = prefix(network[2]); currentPool.evidence.push(evidence); hit = true;
       } else if (host) {
@@ -115,6 +128,12 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
         currentPool.defaultRouters.push(...router[1].split(/\s+/)); currentPool.evidence.push(evidence); hit = true;
       } else if (dns) {
         currentPool.dnsServers.push(...dns[1].split(/\s+/)); currentPool.evidence.push(evidence); hit = true;
+      } else if (domain) {
+        currentPool.domainName = domain[1].trim(); currentPool.evidence.push(evidence); hit = true;
+      } else if (lease) {
+        currentPool.lease = lease[1].trim(); currentPool.leaseSeconds = leaseToSeconds(lease[1]); currentPool.evidence.push(evidence); hit = true;
+      } else if (option) {
+        currentPool.options = [...(currentPool.options ?? []), { code: Number(option[1]), format: option[2]?.toLowerCase(), value: option[3].trim() }]; currentPool.evidence.push(evidence); hit = true;
       } else if (/^update arp$/i.test(text)) {
         currentPool.updateArp = true; currentPool.evidence.push(evidence); hit = true;
       }
@@ -131,6 +150,7 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
       const mode = text.match(/^switchport mode\s+(access|trunk)/i);
       const channel = text.match(/^channel-group\s+(\d+)\s+mode\s+(\S+)/i);
       const policy = text.match(/^service-policy\s+(input|output)\s+(.+)/i);
+      const helper = text.match(/^ip helper-address\s+(\d+\.\d+\.\d+\.\d+)/i);
       if (description) {
         currentInterface.description = description[1].trim(); currentInterface.evidence.push(evidence); hit = true;
       } else if (vrf) {
@@ -170,6 +190,8 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
         currentInterface.natRole = "inside"; currentInterface.evidence.push(evidence); hit = true;
       } else if (policy) {
         currentInterface.servicePolicies = [...(currentInterface.servicePolicies ?? []), `${policy[1]}:${policy[2].trim()}`]; currentInterface.evidence.push(evidence); hit = true;
+      } else if (helper) {
+        currentInterface.helperAddresses = [...(currentInterface.helperAddresses ?? []), helper[1]]; currentInterface.evidence.push(evidence); hit = true;
       } else if (/^tunnel mode sdwan$/i.test(text)) {
         currentInterface.evidence.push(evidence); sdwan = true; hit = true;
       } else if (/^(no ip redirects|ip mtu|mtu|arp timeout|load-interval|negotiation|endpoint-tracker|tunnel source|ipv6|no ipv6|switchport|spanning-tree|storm-control)\b/i.test(text)) {
@@ -186,6 +208,23 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
         currentVrf.addressFamilies.push(family[1].trim()); currentVrf.evidence.push(evidence); hit = true;
       } else if (/^exit-address-family$/i.test(text)) {
         currentVrf.evidence.push(evidence); hit = true;
+      }
+    }
+
+    if (!hit && currentNamedAcl) {
+      const entry = text.match(/^(?:(\d+)\s+)?(permit|deny|remark)\s+(.+)/i);
+      if (entry) {
+        dataset.accessLists.push({
+          ...currentNamedAcl,
+          action: entry[2].toLowerCase() as "permit" | "deny" | "remark",
+          sequence: entry[1] ? Number(entry[1]) : undefined,
+          expression: entry[3].trim(),
+          evidence: [evidence],
+          description: `${currentNamedAcl.name} ${entry[2].toLowerCase()} entry`,
+          descriptionSource: "CLI",
+          descriptionConfidence: 100
+        });
+        hit = true;
       }
     }
 
@@ -246,11 +285,19 @@ export function parseEnhancedRunningConfig(block: CommandBlock, dataset: ParsedD
 
   const role = sdwan ? "SD-WAN Router" : switching && routing ? "Layer 3 Switch" : switching ? "Switch" : routing ? "Router" : "Network Device";
   dataset.devices.push({ hostname, vendor: "cisco", os: sdwan || version?.startsWith("17") ? "Cisco IOS XE" : "Cisco IOS", version, model, serialNumber, role, description: `${role}${model ? ` ${model}` : ""}${version ? ` running ${version}` : ""}`, descriptionSource: "Generated", descriptionConfidence: model || version ? 92 : 75, commands: ["show running-config"] });
-  dataset.parserCoverage = { totalMeaningfulLines: meaningful, recognizedLines: recognized, ignoredLines: ignored, unrecognizedLines: Math.max(0, meaningful - recognized), coveragePercent: meaningful ? Math.round((recognized / meaningful) * 100) : 100 };
+  dataset.parserCoverage = { totalMeaningfulLines: meaningful, recognizedLines: recognized, ignoredLines: ignored, unrecognizedLines: Math.max(0, meaningful - recognized), malformedLines: 0, coveragePercent: meaningful ? Math.round((recognized / meaningful) * 100) : 100 };
 }
 
 function prefix(value: string): number | undefined {
   return value.startsWith("/") ? Number(value.slice(1)) : maskToPrefix(value) ?? undefined;
+}
+
+function leaseToSeconds(value: string): number | undefined {
+  const parts = value.trim().split(/\s+/).map(Number);
+  if (!parts.length || parts.some(part => !Number.isInteger(part) || part < 0)) return undefined;
+  if (parts.length === 1) return parts[0] * 86400;
+  const [days, hours = 0, minutes = 0] = parts;
+  return days * 86400 + hours * 3600 + minutes * 60;
 }
 
 function isIgnored(text: string): boolean {
@@ -258,7 +305,27 @@ function isIgnored(text: string): boolean {
 }
 
 function addFeature(dataset: ParsedDataset, category: ConfigFeatureCategory, feature: string, value: string, scope: string, evidence: ReturnType<typeof makeEvidence>): void {
-  dataset.configFeatures.push({ category, feature, value, scope, status: "Configured", description: `${feature} configuration detected.`, descriptionSource: "Generated", descriptionConfidence: 90, descriptionEvidence: [evidence], evidence: [evidence] });
+  dataset.configFeatures.push({ category, feature, value, scope, status: "Configured", description: featureDescription(feature), descriptionSource: "Generated", descriptionConfidence: 90, descriptionEvidence: [evidence], evidence: [evidence] });
+}
+
+function featureDescription(feature: string): string {
+  const descriptions: Record<string, string> = {
+    "AAA": "Authentication, authorization, and accounting settings were detected. Review the configured TACACS+/RADIUS path and local fallback policy.",
+    "DHCP Snooping": "DHCP Snooping is configured. Inspect its enabled VLANs and trusted uplink ports before relying on binding evidence.",
+    "Dynamic ARP Inspection": "Dynamic ARP Inspection is configured. Validate that the protected VLANs and trusted ports match the intended Layer 2 design.",
+    "Spanning Tree": "Spanning Tree settings were detected. Confirm root placement, PortFast use, and any blocked or inconsistent ports with operational output.",
+    "SNMP": "SNMP management settings were detected. Sensitive credentials are masked; review version, access restrictions, trap hosts, and read/write exposure.",
+    "Logging": "Syslog configuration was detected. Verify the source interface, destination reachability, and retention policy.",
+    "NTP": "Time synchronization configuration was detected. Verify source interface, VRF, preferred server, and synchronization state.",
+    "VRF": "A VRF definition was detected. IP, route, and DHCP evidence must be correlated only within this VRF.",
+    "NAT": "NAT configuration was detected. Review inside/outside roles, overload rules, and the associated access list before troubleshooting address translation.",
+    "Flow and Performance Monitoring": "Flow or performance monitoring is configured. Verify exporter reachability, monitor attachment, and collector policy.",
+    "OMP": "SD-WAN OMP configuration was detected. Review transport, control-plane, and route exchange state with read-only operational commands.",
+    "First-Hop Redundancy": "First-hop redundancy configuration was detected. Validate active/standby or master/backup state and virtual gateway addresses.",
+    "Access List": "An access-list entry was detected. Review its order, direction, and effective interface attachment before concluding traffic is permitted or denied.",
+    "Static Route": "A static route was detected. Verify the next hop, VRF, outgoing interface, and route availability with operational routing output."
+  };
+  return descriptions[feature] ?? `${feature} configuration was detected from the imported CLI.`;
 }
 
 function classify(text: string): [ConfigFeatureCategory, string, boolean?] | null {
@@ -286,6 +353,9 @@ function classify(text: string): [ConfigFeatureCategory, string, boolean?] | nul
     [/^line\s+(con|vty|aux)\b/i, "Management", "Management Line"],
     [/^ipv6 unicast-routing$/i, "Routing", "IPv6 Routing"],
     [/^(fhrp version|standby|vrrp)\b/i, "Routing", "First-Hop Redundancy"],
+    [/^router bgp\b/i, "Routing", "BGP"],
+    [/^router ospf\b/i, "Routing", "OSPF"],
+    [/^router eigrp\b/i, "Routing", "EIGRP"],
     [/^router\s+/i, "Routing", "Routing Protocol"],
     [/^clock timezone\b/i, "Management", "Timezone"],
     [/^ip domain-name\b/i, "Management", "Domain Name"],

@@ -1,7 +1,32 @@
 export type Vendor = "cisco" | "aruba" | "fortigate" | "juniper" | "mikrotik" | "generic";
 
 export type Severity = "Critical" | "High" | "Medium" | "Low" | "Info" | "Passed";
-export type CommandParseStatus = "parsed" | "partially-parsed" | "unsupported" | "malformed" | "empty";
+export type CommandParseStatus = "fully-parsed" | "partially-parsed" | "unsupported" | "malformed" | "empty" | "ambiguous-format";
+
+export interface EvidenceScope {
+  deviceId: string;
+  hostname?: string;
+  site?: string;
+  vendor?: Vendor;
+  platform?: string;
+  vrf?: string;
+  vlan?: number;
+  interfaceName?: string;
+  sourceCommand?: string;
+  observedAt?: string;
+  sourceAgeSeconds?: number;
+}
+
+export interface ConfidenceBreakdown {
+  finalScore: number;
+  evidenceStrength: number;
+  parserQuality: number;
+  scopeMatch: number;
+  freshness: number;
+  corroborationBonus: number;
+  contradictionPenalty: number;
+  missingEvidencePenalty: number;
+}
 
 export type CommandType =
   | "show ip arp"
@@ -55,6 +80,11 @@ export interface Evidence {
   text: string;
   sourceFile?: string;
   normalizedText?: string;
+  collectedAt?: string;
+  deviceTimestamp?: string;
+  ageSeconds?: number;
+  freshness?: "Fresh" | "Acceptable" | "Stale" | "Unknown";
+  scope?: EvidenceScope;
 }
 
 export interface DescriptionMetadata {
@@ -78,6 +108,12 @@ export interface CommandBlock {
   totalLines?: number;
   recognizedLines?: number;
   unrecognizedLines?: number;
+  ignoredLines?: number;
+  malformedLines?: number;
+  recognizedLineNumbers?: number[];
+  ignoredLineNumbers?: number[];
+  unrecognizedLineNumbers?: number[];
+  malformedLineNumbers?: number[];
   coveragePercent?: number;
   missingEvidence?: string[];
   recommendedFollowUpCommands?: string[];
@@ -141,6 +177,10 @@ export interface DhcpPoolRecord extends DescriptionMetadata {
   defaultRouters: string[];
   dnsServers: string[];
   updateArp?: boolean;
+  lease?: string;
+  leaseSeconds?: number;
+  domainName?: string;
+  options?: Array<{ code: number; format?: string; value: string }>;
   poolType?: "Dynamic" | "Reservation" | "Incomplete";
   vrf?: string;
   evidence: Evidence[];
@@ -187,6 +227,14 @@ export interface InterfaceRecord extends DescriptionMetadata {
   natRole?: "inside" | "outside";
   servicePolicies?: string[];
   loadInterval?: number;
+  helperAddresses?: string[];
+  stpRole?: string;
+  stpState?: string;
+  etherChannelState?: string;
+  inputErrors?: number;
+  crcErrors?: number;
+  outputErrors?: number;
+  outputDrops?: number;
   evidence: Evidence[];
 }
 
@@ -255,6 +303,7 @@ export interface ParserCoverage {
   recognizedLines: number;
   ignoredLines: number;
   unrecognizedLines: number;
+  malformedLines: number;
   coveragePercent: number;
 }
 
@@ -262,6 +311,8 @@ export interface LogRecord {
   severity: Severity;
   type: string;
   message: string;
+  /** Timestamp copied from the device log when the source includes one. */
+  deviceTimestamp?: string;
   ip?: string;
   mac?: string;
   vlan?: number;
@@ -293,6 +344,9 @@ export interface Finding extends DescriptionMetadata {
 }
 
 export interface IpInventoryRecord extends DescriptionMetadata {
+  id: string;
+  deviceId: string;
+  vrf: string;
   ip: string;
   status: "Used" | "Likely Free" | "Reserved" | "Excluded" | "Not Free - In DHCP Pool" | "Unknown";
   statusReason?: string;
@@ -304,10 +358,34 @@ export interface IpInventoryRecord extends DescriptionMetadata {
   checkedSources?: string[];
   missingSources?: string[];
   relatedPoolNames?: string[];
+  confidenceBreakdown: ConfidenceBreakdown;
+  contradictions: string[];
   evidence: Evidence[];
 }
 
+export interface IncidentRecord {
+  id: string;
+  type: string;
+  severity: Severity;
+  device: string;
+  interfaceName?: string;
+  ip?: string;
+  mac?: string;
+  vlan?: number;
+  startTimestamp?: string;
+  endTimestamp?: string;
+  durationSeconds?: number;
+  confidence: number;
+  eventCount: number;
+  events: LogRecord[];
+  evidence: Evidence[];
+  verificationCommands: string[];
+}
+
 export interface SubnetRecord extends DescriptionMetadata {
+  id: string;
+  deviceId: string;
+  vrf: string;
   cidr: string;
   network: string;
   prefix: number;
@@ -318,6 +396,27 @@ export interface SubnetRecord extends DescriptionMetadata {
   used: number;
   free: number;
   utilization: number;
+}
+
+export interface EntityNode {
+  id: string;
+  type: "device" | "ip" | "mac" | "interface" | "vlan" | "subnet" | "dhcp-pool";
+  label: string;
+  scope: EvidenceScope;
+  evidence: Evidence[];
+}
+
+export interface EntityLink {
+  id: string;
+  type: "owns" | "observed-as" | "learned-on" | "belongs-to" | "allocated-by" | "contains";
+  sourceId: string;
+  targetId: string;
+  evidence: Evidence[];
+}
+
+export interface EntityGraph {
+  nodes: EntityNode[];
+  links: EntityLink[];
 }
 
 export interface SecurityCheck extends DescriptionMetadata {
@@ -368,10 +467,12 @@ export interface AnalysisResult extends ParsedDataset {
   freeIps: IpInventoryRecord[];
   subnets: SubnetRecord[];
   findings: Finding[];
+  incidents: IncidentRecord[];
   securityChecks: SecurityCheck[];
   securityScore: number;
   evidenceCoverage?: number;
   blockedDevices: Finding[];
   recommendedCommands: string[];
   telegramSummary: string;
+  entityGraph: EntityGraph;
 }

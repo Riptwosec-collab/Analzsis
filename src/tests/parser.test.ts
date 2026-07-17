@@ -109,10 +109,72 @@ ip dhcp pool USERS
  dns-server 10.20.100.2
 `;
 
+const DHCP_DEEP_ANALYSIS_FRAGMENT = `version 17.3
+hostname DHCP-CORE
+ip dhcp pool USERS
+ network 10.60.0.0 255.255.255.0
+ default-router 10.60.0.1
+ dns-server 10.60.0.53
+ domain-name corp.example
+ option 148 ascii "controller=10.60.0.10"
+ lease 0 1
+!
+ip dhcp pool USERS-OVERLAP
+ network 10.60.0.128 255.255.255.128
+ default-router 10.60.0.1
+!
+ip dhcp pool PRINTER-150
+ host 10.60.0.150 255.255.255.0
+ hardware-address 0011.2233.4455
+ default-router 10.60.0.1
+!
+interface Vlan60
+ ip address 10.60.0.1 255.255.255.0
+ ip helper-address 10.60.253.201
+ ip helper-address 10.60.253.202
+`;
+
+const LAYER2_OPERATIONAL_FRAGMENT = `CORE-SW01#show interfaces counters errors
+Port        Align-Err    FCS-Err   Xmit-Err    Rcv-Err  UnderSize OutDiscards
+Gi1/0/2             0          3          0          1          0           8
+CORE-SW01#show spanning-tree
+Interface           Role Sts Cost      Prio.Nbr Type
+Gi1/0/1             Desg FWD 4         128.1    P2p
+Gi1/0/2             Altn BLK 4         128.2    P2p
+CORE-SW01#show etherchannel summary
+Group  Port-channel  Protocol    Ports
+1      Po1(SU)       LACP        Gi1/0/1(P) Gi1/0/2(P)
+`;
+
+const CONFIG_FEATURES_FRAGMENT = `EDGE-RT01#show running-config
+version 17.15
+hostname EDGE-RT01
+aaa new-model
+ip dhcp snooping vlan 10,20
+spanning-tree mode pvst
+logging host 10.1.1.211 vrf CORP
+snmp-server enable traps snmp authentication linkdown linkup
+ntp server vrf CORP 10.1.1.171 prefer
+vrf definition CORP
+ address-family ipv4
+ exit-address-family
+flow exporter SITE-COLLECTOR
+router omp
+ip nat inside source list NAT-ACL interface GigabitEthernet0/0/0 overload
+fhrp version vrrp v3
+snmp-server community demo RW 10
+ip http server
+line vty 0 4
+ transport input telnet ssh
+ip access-list extended USERS-IN
+ 10 permit ip any any
+`;
+
 describe("network utilities", () => {
   it("normalizes MAC and DHCP client identifier formats", () => {
     expect(normalizeMac("6c3b.e524.91f8")).toBe("6c:3b:e5:24:91:f8");
     expect(normalizeMac("016c.3be5.2491.f8")).toBe("6c:3b:e5:24:91:f8");
+    expect(normalizeMac("0100.6677.8899.aabb")).toBe("66:77:88:99:aa:bb");
   });
 
   it("calculates subnets", () => {
@@ -171,6 +233,29 @@ describe("parser", () => {
     expect(parsed.configFeatures.some(item => item.category === "SD-WAN" && item.feature === "OMP")).toBe(true);
   });
 
+  it("classifies operational switch and router configuration features with useful descriptions", () => {
+    const parsed = parseCli(CONFIG_FEATURES_FRAGMENT);
+    const features = new Map(parsed.configFeatures.map(item => [item.feature, item]));
+
+    for (const feature of ["AAA", "DHCP Snooping", "Spanning Tree", "Logging", "SNMP", "NTP", "VRF", "Flow and Performance Monitoring", "OMP", "NAT", "First-Hop Redundancy"]) {
+      expect(features.has(feature)).toBe(true);
+    }
+    expect(features.get("DHCP Snooping")?.description).toContain("trusted uplink ports");
+    expect(features.get("NAT")?.description).toContain("inside/outside roles");
+    expect(parsed.accessLists).toContainEqual(expect.objectContaining({ name: "USERS-IN", aclType: "named", action: "permit", expression: "ip any any" }));
+  });
+
+  it("finds scoped configuration security risks and masks sensitive SNMP evidence", () => {
+    const result = analyzeCli(CONFIG_FEATURES_FRAGMENT);
+
+    expect(result.findings.some(item => item.title === "SNMP read-write community configured" && item.target === "EDGE-RT01")).toBe(true);
+    expect(result.findings.some(item => item.title === "Unencrypted HTTP management enabled")).toBe(true);
+    expect(result.findings.some(item => item.title === "Telnet is permitted on management lines")).toBe(true);
+    expect(result.findings.some(item => item.title === "Access list contains permit ip any any")).toBe(true);
+    const snmpFinding = result.findings.find(item => item.title === "SNMP read-write community configured");
+    expect(snmpFinding?.evidence[0]?.text).not.toContain("demo");
+  });
+
   it("parses config fragments and detects duplicate reservations, incomplete pools, and gateway mismatch", () => {
     const result = analyzeCli(DHCP_RESERVATION_FRAGMENT);
     expect(result.dhcpPools).toHaveLength(4);
@@ -180,6 +265,32 @@ describe("parser", () => {
     expect(result.findings.some(item => item.title === "Incomplete DHCP pool")).toBe(true);
     expect(result.findings.some(item => item.title === "DHCP default gateway is outside the pool subnet")).toBe(true);
     expect(result.parserCoverage.totalMeaningfulLines).toBeGreaterThan(0);
+  });
+
+  it("parses DHCP lease, domain, options, helper addresses, and scoped dynamic-pool risks", () => {
+    const result = analyzeCli(DHCP_DEEP_ANALYSIS_FRAGMENT);
+    const users = result.dhcpPools.find(item => item.name === "USERS");
+    const svi = result.interfaces.find(item => item.name === "Vlan60");
+
+    expect(users?.lease).toBe("0 1");
+    expect(users?.leaseSeconds).toBe(3600);
+    expect(users?.domainName).toBe("corp.example");
+    expect(users?.options).toEqual([{ code: 148, format: "ascii", value: '"controller=10.60.0.10"' }]);
+    expect(svi?.helperAddresses).toEqual(["10.60.253.201", "10.60.253.202"]);
+    expect(result.findings.some(item => item.title === "Dynamic DHCP pools overlap")).toBe(true);
+    expect(result.findings.some(item => item.title === "DHCP reservation is inside a dynamic pool")).toBe(true);
+  });
+
+  it("parses Layer 2 operational counters, STP state, and EtherChannel members", () => {
+    const result = analyzeCli(LAYER2_OPERATIONAL_FRAGMENT);
+    const counters = result.interfaces.find(item => item.name === "Gi1/0/2" && item.crcErrors !== undefined);
+    const blocked = result.interfaces.find(item => item.name === "Gi1/0/2" && item.stpState !== undefined);
+    const member = result.interfaces.find(item => item.name === "Gi1/0/1" && item.etherChannelState !== undefined);
+
+    expect(counters).toMatchObject({ crcErrors: 3, inputErrors: 1, outputDrops: 8 });
+    expect(blocked).toMatchObject({ stpRole: "Altn", stpState: "BLK" });
+    expect(member).toMatchObject({ channelGroup: "1", channelMode: "LACP", etherChannelState: "SU/P" });
+    expect(result.findings.some(item => item.title === "Interface error counters detected" && item.target === "Gi1/0/2")).toBe(true);
   });
 
   it("normalizes common command abbreviations and records coverage", () => {
@@ -193,7 +304,7 @@ describe("parser", () => {
     ].join("\n"));
     expect(parsed.commandBlocks.map(block => block.command)).toContain("show ip interface brief");
     expect(parsed.commandBlocks.map(block => block.command)).toContain("show running-config");
-    expect(parsed.commandBlocks.every(block => block.parseStatus === "parsed")).toBe(true);
+    expect(parsed.commandBlocks.every(block => block.parseStatus === "fully-parsed")).toBe(true);
     expect(parsed.commandBlocks.every(block => (block.coveragePercent ?? 0) > 0)).toBe(true);
   });
 
@@ -209,6 +320,25 @@ describe("parser", () => {
     expect(block.lines.length).toBeGreaterThan(0);
     expect(block.recommendedFollowUpCommands?.length).toBeGreaterThan(0);
     expect(parsed.parserWarnings[0]?.description).toContain("Coverage");
+  });
+
+  it("detects a raw IOS running configuration before broad static or MAC keywords", () => {
+    const parsed = parseCli([
+      "! Last configuration change at 10:00:00 UTC",
+      "version 17.3",
+      "hostname CORE-C9500",
+      "ip dhcp pool USERS",
+      " network 10.77.0.0 255.255.255.0",
+      "interface Vlan77",
+      " ip address 10.77.0.1 255.255.255.0",
+      "arp 10.77.0.10 0011.2233.4455 ARPA",
+      "ip route 10.90.0.0 255.255.0.0 10.77.0.254"
+    ].join("\n"));
+
+    expect(parsed.commandBlocks[0]?.command).toBe("show running-config");
+    expect(parsed.commandBlocks[0]?.vendor).toBe("cisco");
+    expect(parsed.dhcpPools.some(item => item.name === "USERS")).toBe(true);
+    expect(parsed.interfaces.some(item => item.name === "Vlan77")).toBe(true);
   });
 });
 
@@ -320,5 +450,87 @@ describe("analysis", () => {
     expect(freeCandidate?.missingSources ?? []).toHaveLength(0);
     expect(freeCandidate?.checkedSources).toEqual(expect.arrayContaining(["ARP", "DHCP Binding", "MAC Table"]));
     expect(freeCandidate?.statusReason).toContain("No ARP");
+  });
+
+  it("keeps identical IP and MAC evidence separate across device and VRF scopes", () => {
+    const result = analyzeCli([
+      "EDGE-A#show running-config",
+      "hostname EDGE-A",
+      "vrf definition BLUE",
+      " address-family ipv4",
+      " exit-address-family",
+      "interface Vlan10",
+      " vrf forwarding BLUE",
+      " ip address 10.90.10.1 255.255.255.0",
+      "EDGE-A#show ip arp",
+      "Protocol  Address          Age (min)  Hardware Addr   Type   Interface",
+      "Internet  10.90.10.20            2   0011.2233.4455  ARPA   Vlan10",
+      "EDGE-A#show mac address-table",
+      "Vlan    Mac Address       Type        Ports",
+      "  10    0011.2233.4455    DYNAMIC     Gi1/0/5",
+      "EDGE-B#show running-config",
+      "hostname EDGE-B",
+      "interface Vlan10",
+      " ip address 10.90.10.1 255.255.255.0",
+      "EDGE-B#show ip arp",
+      "Protocol  Address          Age (min)  Hardware Addr   Type   Interface",
+      "Internet  10.90.10.20            2   0011.2233.4455  ARPA   Vlan10",
+      "EDGE-B#show mac address-table",
+      "Vlan    Mac Address       Type        Ports",
+      "  10    0011.2233.4455    DYNAMIC     Gi1/0/9"
+    ].join("\n"));
+
+    const sharedIp = result.ipInventory.filter(item => item.ip === "10.90.10.20");
+    expect(sharedIp).toHaveLength(2);
+    expect(new Set(sharedIp.map(item => item.id)).size).toBe(2);
+    expect(result.findings.some(item => item.title === "Duplicate IP suspected")).toBe(false);
+    expect(result.findings.some(item => item.title === "MAC appears on multiple ports")).toBe(false);
+    expect(result.entityGraph.nodes.filter(item => item.type === "ip" && item.label === "10.90.10.20")).toHaveLength(2);
+  });
+
+  it("reports partial parser coverage from unrecognized lines instead of treating every line as parsed", () => {
+    const parsed = parseCli([
+      "CORE-SW01#show running-config",
+      "interface Vlan70",
+      " ip address 10.70.70.1 255.255.255.0",
+      " unsupported-feature value-that-has-no-parser"
+    ].join("\n"));
+    const block = parsed.commandBlocks[0];
+
+    expect(block.parseStatus).toBe("partially-parsed");
+    expect(block.recognizedLineNumbers).toEqual(expect.arrayContaining([2, 3]));
+    expect(block.unrecognizedLineNumbers).toContain(4);
+    expect(block.coveragePercent).toBeLessThan(100);
+    expect(parsed.parserWarnings.some(item => item.title === "Parser coverage incomplete")).toBe(true);
+  });
+
+  it("explains ARP and DHCP MAC contradictions with a confidence breakdown", () => {
+    const result = analyzeCli([
+      "CORE-SW01#show ip arp",
+      "Protocol  Address          Age (min)  Hardware Addr   Type   Interface",
+      "Internet  10.99.99.20            2   0011.2233.4455  ARPA   Vlan99",
+      "CORE-SW01#show ip dhcp binding",
+      "10.99.99.20    0100.6677.8899.aabb   Infinite   Automatic"
+    ].join("\n"));
+    const row = result.ipInventory.find(item => item.ip === "10.99.99.20");
+
+    expect(row?.contradictions.some(item => item.includes("ARP and DHCP binding"))).toBe(true);
+    expect(row?.confidenceBreakdown.contradictionPenalty).toBeGreaterThan(0);
+    expect(row?.confidenceBreakdown.finalScore).toBe(row?.confidence);
+  });
+
+  it("preserves dated log timestamps and groups only related log events into an incident", () => {
+    const result = analyzeCli([
+      "CORE-SW01#show logging",
+      "2026-07-17T10:00:00Z %SW_MATM-4-MACFLAP_NOTIF: Host 0011.2233.4455 in vlan 20 is flapping between port Gi1/0/5 and port Gi1/0/6",
+      "2026-07-17T10:00:45Z %SW_MATM-4-MACFLAP_NOTIF: Host 0011.2233.4455 in vlan 20 is flapping between port Gi1/0/5 and port Gi1/0/7"
+    ].join("\n"));
+
+    expect(result.logs).toHaveLength(2);
+    expect(result.logs[0]?.deviceTimestamp).toBe("2026-07-17T10:00:00Z");
+    expect(result.logs[0]?.evidence[0]?.ageSeconds).toBeTypeOf("number");
+    expect(result.incidents).toHaveLength(1);
+    expect(result.incidents[0]).toMatchObject({ type: "MAC_FLAPPING", eventCount: 2, durationSeconds: 45, mac: "00:11:22:33:44:55" });
+    expect(result.incidents[0]?.verificationCommands).toContain("show mac address-table dynamic");
   });
 });

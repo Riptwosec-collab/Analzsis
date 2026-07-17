@@ -6,6 +6,10 @@ import type {
   SecurityCheck,
   SubnetRecord
 } from "@/types/network";
+import { calculateConfidence } from "@/evidence/confidence-engine";
+import { ipEntityKey, normalizeVrf, scopeFromEvidence, scopeKey, subnetEntityKey } from "@/evidence/evidence-scope";
+import { buildEntityGraph } from "@/entities/entity-graph";
+import { buildIncidents } from "@/correlation/incident-analysis";
 import { calculateSubnet, ipInSubnet, ipToNumber, numberToIp } from "@/utils/ip";
 
 export function correlate(dataset: ParsedDataset): AnalysisResult {
@@ -15,6 +19,7 @@ export function correlate(dataset: ParsedDataset): AnalysisResult {
     ...dataset.parserWarnings,
     ...findDuplicateIpFindings(ipInventory),
     ...findMacFlapping(dataset),
+    ...findInterfaceCounterFindings(dataset),
     ...findDhcpPoolIssues(dataset),
     ...findDhcpConflicts(dataset),
     ...findLogFindings(dataset)
@@ -48,16 +53,18 @@ export function correlate(dataset: ParsedDataset): AnalysisResult {
     freeIps: ipInventory.filter(item => item.status === "Likely Free"),
     subnets: subnets.map(subnet => ({
       ...subnet,
-      used: ipInventory.filter(item => item.status === "Used" && ipInSubnet(item.ip, subnet.network, subnet.prefix)).length,
-      free: ipInventory.filter(item => item.status === "Likely Free" && ipInSubnet(item.ip, subnet.network, subnet.prefix)).length,
-      utilization: subnet.totalUsable ? Math.round((ipInventory.filter(item => item.status === "Used" && ipInSubnet(item.ip, subnet.network, subnet.prefix)).length / subnet.totalUsable) * 100) : 0
+      used: ipInventory.filter(item => item.status === "Used" && item.deviceId === subnet.deviceId && item.vrf === subnet.vrf && ipInSubnet(item.ip, subnet.network, subnet.prefix)).length,
+      free: ipInventory.filter(item => item.status === "Likely Free" && item.deviceId === subnet.deviceId && item.vrf === subnet.vrf && ipInSubnet(item.ip, subnet.network, subnet.prefix)).length,
+      utilization: subnet.totalUsable ? Math.round((ipInventory.filter(item => item.status === "Used" && item.deviceId === subnet.deviceId && item.vrf === subnet.vrf && ipInSubnet(item.ip, subnet.network, subnet.prefix)).length / subnet.totalUsable) * 100) : 0
     })),
     findings: allFindings,
+    incidents: buildIncidents(dataset.logs),
     securityChecks,
     securityScore,
     blockedDevices,
     recommendedCommands: buildRecommendedCommands(allFindings),
-    telegramSummary: ""
+    telegramSummary: "",
+    entityGraph: buildEntityGraph(dataset, subnets)
   };
 
   result.telegramSummary = buildTelegramSummary(result);
@@ -70,7 +77,12 @@ function buildSubnets(dataset: ParsedDataset): SubnetRecord[] {
     if (!intf.ip || intf.prefix === undefined) continue;
     const subnet = calculateSubnet(intf.ip, intf.prefix);
     if (!subnet) continue;
-    map.set(subnet.cidr, {
+    const scope = scopeFromEvidence(intf.evidence, { vrf: intf.vrf });
+    const id = subnetEntityKey(scope, subnet.cidr);
+    map.set(id, {
+      id,
+      deviceId: scope.deviceId,
+      vrf: normalizeVrf(scope.vrf),
       cidr: subnet.cidr,
       network: subnet.network,
       prefix: subnet.prefix,
@@ -87,7 +99,12 @@ function buildSubnets(dataset: ParsedDataset): SubnetRecord[] {
     if (!pool.network || pool.prefix === undefined) continue;
     const subnet = calculateSubnet(pool.network, pool.prefix);
     if (!subnet) continue;
-    map.set(subnet.cidr, {
+    const scope = scopeFromEvidence(pool.evidence, { vrf: pool.vrf });
+    const id = subnetEntityKey(scope, subnet.cidr);
+    map.set(id, {
+      id,
+      deviceId: scope.deviceId,
+      vrf: normalizeVrf(scope.vrf),
       cidr: subnet.cidr,
       network: subnet.network,
       prefix: subnet.prefix,
@@ -100,16 +117,29 @@ function buildSubnets(dataset: ParsedDataset): SubnetRecord[] {
       utilization: 0
     });
   }
-  return [...map.values()].sort((a, b) => (ipToNumber(a.network) ?? 0) - (ipToNumber(b.network) ?? 0));
+  return [...map.values()].sort((a, b) => a.deviceId.localeCompare(b.deviceId) || a.vrf.localeCompare(b.vrf) || (ipToNumber(a.network) ?? 0) - (ipToNumber(b.network) ?? 0));
 }
 
 function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInventoryRecord[] {
   const map = new Map<string, IpInventoryRecord>();
-  const commandSet = new Set(dataset.commandBlocks.filter(block => block.parsed).map(block => block.command));
-  const checkedSources = collectedSourceNames(commandSet);
-  const missingSources = missingFreeEvidence(commandSet);
-  const touch = (ip: string, update: Partial<IpInventoryRecord>) => {
-    const current = map.get(ip) ?? {
+  const scopeForIp = (evidence: IpInventoryRecord["evidence"], ip: string, overrides: Parameters<typeof scopeFromEvidence>[1] = {}) => {
+    const scope = scopeFromEvidence(evidence, overrides);
+    if (overrides.vrf) return scope;
+    const matchingSubnets = subnets.filter(subnet => subnet.deviceId === scope.deviceId && ipInSubnet(ip, subnet.network, subnet.prefix));
+    return matchingSubnets.length === 1
+      ? scopeFromEvidence(evidence, { ...overrides, vrf: matchingSubnets[0].vrf })
+      : scope;
+  };
+  const sourceState = (scope: ReturnType<typeof scopeFromEvidence>) => {
+    const commandSet = new Set(dataset.commandBlocks.filter(block => block.parsed && block.device === scope.deviceId).map(block => block.command));
+    return { commandSet, checkedSources: collectedSourceNames(commandSet), missingSources: missingFreeEvidence(commandSet) };
+  };
+  const touch = (ip: string, scope: ReturnType<typeof scopeFromEvidence>, update: Partial<IpInventoryRecord>) => {
+    const id = ipEntityKey(scope, ip);
+    const current = map.get(id) ?? {
+      id,
+      deviceId: scope.deviceId,
+      vrf: normalizeVrf(scope.vrf),
       ip,
       status: "Unknown",
       statusReason: "No evidence has classified this IP yet.",
@@ -121,11 +151,13 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       checkedSources: [],
       missingSources: [],
       relatedPoolNames: [],
+      confidenceBreakdown: calculateConfidence({ baseEvidenceStrength: 35 }),
+      contradictions: [],
       evidence: []
     } satisfies IpInventoryRecord;
     const status = chooseStatus(current.status, update.status);
     const statusAccepted = !update.status || status === update.status;
-    map.set(ip, {
+    map.set(id, {
       ...current,
       ...update,
       status,
@@ -144,21 +176,25 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
 
   for (const log of dataset.logs) {
     if (!log.ip) continue;
-    touch(log.ip, {
+    const scope = scopeForIp(log.evidence, log.ip, { vlan: log.vlan, interfaceName: log.interfaceName });
+    const state = sourceState(scope);
+    touch(log.ip, scope, {
       status: "Unknown",
       statusReason: "Security or log evidence mentions this IP, but no ARP, DHCP binding, MAC-table, reservation, or interface ownership evidence resolved it.",
       confidence: 45,
       vlans: log.vlan ? [log.vlan] : [],
       ports: log.interfaceName ? [log.interfaceName] : [],
       sources: ["Log/Security Event"],
-      checkedSources,
-      missingSources,
+      checkedSources: state.checkedSources,
+      missingSources: state.missingSources,
       evidence: log.evidence
     });
   }
 
   for (const record of dataset.arp) {
-    touch(record.ip, {
+    const scope = scopeForIp(record.evidence, record.ip, { vrf: record.vrf, vlan: record.vlan, interfaceName: record.interfaceName });
+    const state = sourceState(scope);
+    touch(record.ip, scope, {
       status: record.mac ? "Used" : "Unknown",
       statusReason: record.mac ? "ARP entry with MAC was found." : "ARP entry exists but no MAC was parsed, so the IP is not confirmed free.",
       confidence: record.mac ? 90 : 45,
@@ -166,42 +202,48 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
       vlans: record.vlan ? [record.vlan] : [],
       ports: record.interfaceName ? [record.interfaceName] : [],
       sources: ["ARP"],
-      checkedSources,
+      checkedSources: state.checkedSources,
       evidence: record.evidence
     });
   }
   for (const record of dataset.dhcpBindings) {
-    touch(record.ip, {
+    const scope = scopeForIp(record.evidence, record.ip, { vrf: record.vrf, interfaceName: record.interfaceName });
+    const state = sourceState(scope);
+    touch(record.ip, scope, {
       status: "Used",
       statusReason: "DHCP binding or source-binding evidence exists for this IP.",
       confidence: record.mac ? 82 : 60,
       macs: record.mac ? [record.mac] : [],
       ports: record.interfaceName ? [record.interfaceName] : [],
       sources: ["DHCP Binding"],
-      checkedSources,
+      checkedSources: state.checkedSources,
       evidence: record.evidence
     });
   }
   for (const conflict of dataset.dhcpConflicts) {
-    touch(conflict.ip, {
+    const scope = scopeForIp(conflict.evidence, conflict.ip, { vrf: conflict.vrf });
+    const state = sourceState(scope);
+    touch(conflict.ip, scope, {
       status: "Unknown",
       statusReason: "DHCP conflict evidence exists for this IP. It must be verified before reuse.",
       confidence: 80,
       sources: ["DHCP Conflict"],
-      checkedSources,
-      missingSources,
+      checkedSources: state.checkedSources,
+      missingSources: state.missingSources,
       evidence: conflict.evidence
     });
   }
   for (const pool of dataset.dhcpPools) {
     if (!pool.host) continue;
-    touch(pool.host, {
+    const scope = scopeForIp(pool.evidence, pool.host, { vrf: pool.vrf });
+    const state = sourceState(scope);
+    touch(pool.host, scope, {
       status: "Reserved",
       statusReason: "DHCP reservation or host pool is configured for this IP.",
       confidence: 100,
       macs: pool.hardwareAddress ? [pool.hardwareAddress] : [],
       sources: ["DHCP Reservation"],
-      checkedSources,
+      checkedSources: state.checkedSources,
       relatedPoolNames: [pool.name],
       evidence: pool.evidence
     });
@@ -211,28 +253,32 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
     const end = ipToNumber(range.endIp);
     if (start === null || end === null) continue;
     const count = Math.min(4096, Math.max(0, end - start + 1));
+    const scope = scopeFromEvidence(range.evidence, { vrf: range.vrf });
+    const state = sourceState(scope);
     for (let offset = 0; offset < count; offset += 1) {
       const ip = numberToIp(start + offset);
-      touch(ip, {
+      touch(ip, scope, {
         status: "Excluded",
         statusReason: "IP is configured under ip dhcp excluded-address and must not be treated as free.",
         confidence: 100,
         sources: ["DHCP Excluded"],
-        checkedSources,
+        checkedSources: state.checkedSources,
         evidence: range.evidence
       });
     }
   }
   for (const record of dataset.interfaces) {
     if (!record.ip) continue;
-    touch(record.ip, {
+    const scope = scopeFromEvidence(record.evidence, { vrf: record.vrf, vlan: typeof record.vlan === "number" ? record.vlan : undefined, interfaceName: record.name });
+    const state = sourceState(scope);
+    touch(record.ip, scope, {
       status: "Reserved",
       statusReason: "Interface, SVI, or routed interface owns this IP.",
       confidence: 100,
       vlans: typeof record.vlan === "number" ? [record.vlan] : [],
       ports: [record.name],
       sources: ["Interface IP"],
-      checkedSources,
+      checkedSources: state.checkedSources,
       evidence: record.evidence
     });
   }
@@ -242,59 +288,62 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
   // raises Free confidence when ARP/DHCP/MAC evidence is also absent.
   const pingNoReply = new Set<string>();
   for (const ping of dataset.pingResults) {
+    const scope = resolvePingScope(subnets, ping.ip) ?? scopeFromEvidence(ping.evidence);
+    const state = sourceState(scope);
     if (ping.reachable) {
-      touch(ping.ip, {
+      touch(ping.ip, scope, {
         status: "Used",
         statusReason: "Host replied to a pasted ping/reachability scan.",
         confidence: 88,
         macs: ping.mac ? [ping.mac] : [],
         sources: [`Ping Reply${ping.rttMs !== undefined ? ` (${ping.rttMs} ms)` : ""}`],
-        checkedSources: [...checkedSources, "Ping Sweep"],
+        checkedSources: [...state.checkedSources, "Ping Sweep"],
         evidence: ping.evidence
       });
     } else {
-      pingNoReply.add(ping.ip);
+      pingNoReply.add(ipEntityKey(scope, ping.ip));
     }
   }
 
-  const arpIps = new Set(dataset.arp.map(record => record.ip));
   for (const subnet of subnets) {
     if (subnet.prefix < 20 || subnet.prefix > 30) continue;
     const start = ipToNumber(subnet.firstHost);
     const end = ipToNumber(subnet.lastHost);
     if (start === null || end === null) continue;
+    const scope = scopeFromEvidence(undefined, { deviceId: subnet.deviceId, vrf: subnet.vrf });
+    const state = sourceState(scope);
     for (let value = start; value <= end; value += 1) {
       const ip = numberToIp(value);
-      if (!map.has(ip) && !arpIps.has(ip)) {
-        const excluded = findExcludedRangeForIp(dataset, ip);
+      if (!map.has(ipEntityKey(scope, ip))) {
+        const excluded = findExcludedRangeForIp(dataset, ip, scope);
         if (excluded) {
-          touch(ip, {
+          touch(ip, scope, {
             status: "Excluded",
             statusReason: "IP is configured under ip dhcp excluded-address and must not be treated as free.",
             confidence: 100,
             sources: ["DHCP Excluded"],
-            checkedSources,
+            checkedSources: state.checkedSources,
             evidence: excluded.evidence
           });
           continue;
         }
-        const pool = findDynamicPoolForIp(dataset, ip);
+        const pool = findDynamicPoolForIp(dataset, ip, scope);
         if (pool) {
-          touch(ip, {
+          touch(ip, scope, {
             status: "Not Free - In DHCP Pool",
             statusReason: "IP is inside a dynamic DHCP pool. Pool capacity is not the same as a reusable free IP.",
             confidence: 95,
             sources: ["DHCP Pool range"],
-            checkedSources,
+            checkedSources: state.checkedSources,
             relatedPoolNames: [pool.name],
             evidence: pool.evidence
           });
           continue;
         }
-        const hasFullEvidence = hasEnoughEvidenceToCallFree(dataset, commandSet, subnet);
-        const noReply = pingNoReply.has(ip);
-        const freeConfidence = hasFullEvidence ? (noReply ? 88 : 60) : (noReply ? 70 : 35);
-        touch(ip, {
+        const hasFullEvidence = hasEnoughEvidenceToCallFree(dataset, state.commandSet, subnet);
+        const noReply = pingNoReply.has(ipEntityKey(scope, ip));
+        const freeConfidence = hasFullEvidence ? (noReply ? 88 : 60) : (noReply ? 70 : 42);
+        touch(ip, scope, {
           status: "Likely Free",
           statusReason: hasFullEvidence
             ? (noReply
@@ -309,15 +358,17 @@ function buildInventory(dataset: ParsedDataset, subnets: SubnetRecord[]): IpInve
             ...(hasFullEvidence ? ["No ARP/DHCP/MAC evidence"] : ["Config-only candidate", "Outside DHCP Pool"]),
             ...(noReply ? ["Ping: no reply"] : [])
           ],
-          checkedSources: noReply ? [...checkedSources, "Ping Sweep"] : checkedSources,
-          missingSources: hasFullEvidence ? [] : missingSources,
-          evidence: dataset.pingResults.find(record => record.ip === ip)?.evidence ?? []
+          checkedSources: noReply ? [...state.checkedSources, "Ping Sweep"] : state.checkedSources,
+          missingSources: hasFullEvidence ? [] : state.missingSources,
+          evidence: dataset.pingResults.find(record => record.ip === ip && scopeKey(scopeFromEvidence(record.evidence)) === scopeKey(scope))?.evidence ?? []
         });
       }
     }
   }
 
-  return [...map.values()].sort((a, b) => (ipToNumber(a.ip) ?? 0) - (ipToNumber(b.ip) ?? 0));
+  return [...map.values()]
+    .map(item => finalizeInventoryRecord(item, dataset, subnets))
+    .sort((a, b) => a.deviceId.localeCompare(b.deviceId) || a.vrf.localeCompare(b.vrf) || (ipToNumber(a.ip) ?? 0) - (ipToNumber(b.ip) ?? 0));
 }
 
 function chooseStatus(current: IpInventoryRecord["status"], next?: IpInventoryRecord["status"]) {
@@ -333,19 +384,19 @@ function chooseStatus(current: IpInventoryRecord["status"], next?: IpInventoryRe
   return rank[next] >= rank[current] ? next : current;
 }
 
-function findDynamicPoolForIp(dataset: ParsedDataset, ip: string) {
+function findDynamicPoolForIp(dataset: ParsedDataset, ip: string, scope: ReturnType<typeof scopeFromEvidence>) {
   return dataset.dhcpPools.find(pool => {
     if (pool.poolType === "Reservation" || pool.host || !pool.network || pool.prefix === undefined) return false;
-    return ipInSubnet(ip, pool.network, pool.prefix);
+    return scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf })) === scopeKey(scope) && ipInSubnet(ip, pool.network, pool.prefix);
   });
 }
 
-function findExcludedRangeForIp(dataset: ParsedDataset, ip: string) {
+function findExcludedRangeForIp(dataset: ParsedDataset, ip: string, scope: ReturnType<typeof scopeFromEvidence>) {
   return dataset.dhcpExcludedRanges.find(range => {
     const value = ipToNumber(ip);
     const start = ipToNumber(range.startIp);
     const end = ipToNumber(range.endIp);
-    return value !== null && start !== null && end !== null && value >= start && value <= end;
+    return scopeKey(scopeFromEvidence(range.evidence, { vrf: range.vrf })) === scopeKey(scope) && value !== null && start !== null && end !== null && value >= start && value <= end;
   });
 }
 
@@ -375,9 +426,52 @@ function hasEnoughEvidenceToCallFree(dataset: ParsedDataset, commandSet: Set<str
   const hasArp = commandSet.has("show ip arp") || commandSet.has("show arp");
   const hasDhcpBinding = commandSet.has("show ip dhcp binding") || commandSet.has("show ip dhcp snooping binding") || commandSet.has("show ip source binding");
   const hasMac = commandSet.has("show mac address-table");
-  const hasSubnetEvidence = dataset.interfaces.some(item => item.ip && item.prefix !== undefined && ipInSubnet(item.ip, subnet.network, subnet.prefix))
-    || dataset.dhcpPools.some(pool => pool.network && pool.prefix !== undefined && ipInSubnet(pool.network, subnet.network, subnet.prefix));
+  const hasSubnetEvidence = dataset.interfaces.some(item => item.ip && item.prefix !== undefined && scopeFromEvidence(item.evidence, { vrf: item.vrf }).deviceId === subnet.deviceId && normalizeVrf(item.vrf) === subnet.vrf && ipInSubnet(item.ip, subnet.network, subnet.prefix))
+    || dataset.dhcpPools.some(pool => pool.network && pool.prefix !== undefined && scopeFromEvidence(pool.evidence, { vrf: pool.vrf }).deviceId === subnet.deviceId && normalizeVrf(pool.vrf) === subnet.vrf && ipInSubnet(pool.network, subnet.network, subnet.prefix));
   return hasSubnetEvidence && hasArp && hasDhcpBinding && hasMac;
+}
+
+function finalizeInventoryRecord(item: IpInventoryRecord, dataset: ParsedDataset, subnets: SubnetRecord[]): IpInventoryRecord {
+  const scope = scopeFromEvidence(item.evidence, { deviceId: item.deviceId, vrf: item.vrf });
+  const recordScope = (evidence: IpInventoryRecord["evidence"], ip: string, vrf?: string) => {
+    const base = scopeFromEvidence(evidence, { vrf });
+    if (vrf) return base;
+    const matches = subnets.filter(subnet => subnet.deviceId === base.deviceId && ipInSubnet(ip, subnet.network, subnet.prefix));
+    return matches.length === 1 ? scopeFromEvidence(evidence, { vrf: matches[0].vrf }) : base;
+  };
+  const arpMacs = dataset.arp
+    .filter(record => record.ip === item.ip && scopeKey(recordScope(record.evidence, record.ip, record.vrf)) === scopeKey(scope))
+    .map(record => record.mac)
+    .filter((mac): mac is string => Boolean(mac));
+  const bindingMacs = dataset.dhcpBindings
+    .filter(record => record.ip === item.ip && scopeKey(recordScope(record.evidence, record.ip, record.vrf)) === scopeKey(scope))
+    .map(record => record.mac)
+    .filter((mac): mac is string => Boolean(mac));
+  const contradictions = [...item.contradictions];
+  if (new Set(item.macs).size > 1) contradictions.push("Multiple MAC addresses were observed for this IP in the same device and VRF scope.");
+  if (arpMacs.length && bindingMacs.length && !arpMacs.some(mac => bindingMacs.includes(mac))) {
+    contradictions.push("ARP and DHCP binding identify different MAC addresses for this IP in the same scope.");
+  }
+  const coverageValues = item.evidence
+    .map(evidence => dataset.commandBlocks.find(block => block.device === evidence.device && block.command === evidence.command && evidence.line >= block.startLine && evidence.line <= (block.lines.at(-1)?.line ?? block.startLine))?.coveragePercent)
+    .filter((value): value is number => value !== undefined);
+  const parserCoverage = coverageValues.length ? Math.round(coverageValues.reduce((total, value) => total + value, 0) / coverageValues.length) : 100;
+  const confidenceBreakdown = calculateConfidence({
+    baseEvidenceStrength: item.confidence,
+    parserCoverage,
+    scopeMatch: item.deviceId === scope.deviceId && item.vrf === normalizeVrf(scope.vrf) ? 100 : 0,
+    evidence: item.evidence,
+    corroboratingSources: item.sources.length,
+    contradictions: contradictions.length,
+    missingEvidence: item.missingSources?.length ?? 0
+  });
+  return { ...item, contradictions: unique(contradictions), confidence: confidenceBreakdown.finalScore, confidenceBreakdown };
+}
+
+function resolvePingScope(subnets: SubnetRecord[], ip: string): ReturnType<typeof scopeFromEvidence> | null {
+  const matches = subnets.filter(subnet => ipInSubnet(ip, subnet.network, subnet.prefix));
+  if (matches.length !== 1) return null;
+  return scopeFromEvidence(undefined, { deviceId: matches[0].deviceId, vrf: matches[0].vrf });
 }
 
 function findDuplicateIpFindings(inventory: IpInventoryRecord[]): Finding[] {
@@ -387,7 +481,7 @@ function findDuplicateIpFindings(inventory: IpInventoryRecord[]): Finding[] {
     category: "IP",
     title: "Duplicate IP suspected",
     target: item.ip,
-    description: `${item.ip} is associated with multiple MAC addresses: ${item.macs.join(", ")}.`,
+    description: `${item.ip} is associated with multiple MAC addresses in ${item.deviceId} / VRF ${item.vrf}: ${item.macs.join(", ")}.`,
     confidence: Math.min(100, item.confidence + 5),
     evidence: item.evidence,
     recommendation: "Verify ARP on the gateway, locate each MAC on the switch fabric, and confirm the owner before changing addressing.",
@@ -396,23 +490,26 @@ function findDuplicateIpFindings(inventory: IpInventoryRecord[]): Finding[] {
 }
 
 function findMacFlapping(dataset: ParsedDataset): Finding[] {
-  const map = new Map<string, Set<string>>();
+  const map = new Map<string, { mac: string; deviceId: string; vlan?: number; ports: Set<string>; evidence: Finding["evidence"] }>();
   for (const mac of dataset.macTable) {
-    const ports = map.get(mac.mac) ?? new Set<string>();
-    ports.add(mac.port);
-    map.set(mac.mac, ports);
+    const scope = scopeFromEvidence(mac.evidence, { vlan: mac.vlan, interfaceName: mac.port });
+    const key = `${scope.deviceId}|${mac.vlan ?? "unknown"}|${mac.mac}`;
+    const current = map.get(key) ?? { mac: mac.mac, deviceId: scope.deviceId, vlan: mac.vlan, ports: new Set<string>(), evidence: [] };
+    current.ports.add(mac.port);
+    current.evidence.push(...mac.evidence);
+    map.set(key, current);
   }
-  const findings = [...map.entries()].filter(([, ports]) => ports.size > 1).map(([mac, ports], index): Finding => ({
+  const findings = [...map.values()].filter(item => item.ports.size > 1).map((item, index): Finding => ({
     id: `mac-multiple-ports-${index}`,
     severity: "High",
     category: "Switching",
     title: "MAC appears on multiple ports",
-    target: mac,
-    description: `${mac} appears on ${[...ports].join(", ")} in the imported MAC table.`,
+    target: item.mac,
+    description: `${item.mac} appears on ${[...item.ports].join(", ")} on ${item.deviceId}${item.vlan !== undefined ? ` VLAN ${item.vlan}` : ""}.`,
     confidence: 78,
-    evidence: dataset.macTable.filter(row => row.mac === mac).flatMap(row => row.evidence),
+    evidence: item.evidence,
     recommendation: "Check whether the ports are uplinks, port-channels, loops, or endpoint moves before treating it as a fault.",
-    verificationCommands: [`show mac address-table address ${mac}`, "show logging | include MACFLAP", "show interfaces status"]
+    verificationCommands: [`show mac address-table address ${item.mac}`, "show logging | include MACFLAP", "show interfaces status"]
   }));
   const logFindings = dataset.logs.filter(log => log.type === "MAC_FLAPPING").map((log, index): Finding => ({
     id: `mac-flap-log-${index}`,
@@ -427,6 +524,31 @@ function findMacFlapping(dataset: ParsedDataset): Finding[] {
     verificationCommands: log.mac ? [`show mac address-table address ${log.mac}`, "show spanning-tree inconsistentports"] : ["show logging | include MACFLAP"]
   }));
   return [...findings, ...logFindings];
+}
+
+function findInterfaceCounterFindings(dataset: ParsedDataset): Finding[] {
+  return dataset.interfaces.flatMap((record, index): Finding[] => {
+    const counters = {
+      input: record.inputErrors ?? 0,
+      crc: record.crcErrors ?? 0,
+      output: record.outputErrors ?? 0,
+      drops: record.outputDrops ?? 0
+    };
+    if (!Object.values(counters).some(value => value > 0)) return [];
+    const detail = Object.entries(counters).filter(([, value]) => value > 0).map(([name, value]) => `${name}=${value}`).join(", ");
+    return [{
+      id: `interface-counters-${index}`,
+      severity: counters.crc > 0 || counters.input > 0 ? "High" : "Medium",
+      category: "Interface",
+      title: "Interface error counters detected",
+      target: record.name,
+      description: `${record.name} reports non-zero interface counters: ${detail}.`,
+      confidence: 90,
+      evidence: record.evidence,
+      recommendation: "Check cabling, optics, speed/duplex, queue pressure, and counter trend before remediation.",
+      verificationCommands: [`show interfaces ${record.name}`, `show interfaces counters errors | include ${record.name}`, "show logging"]
+    }];
+  });
 }
 
 function findDhcpPoolIssues(dataset: ParsedDataset): Finding[] {
@@ -475,45 +597,27 @@ function findLogFindings(dataset: ParsedDataset): Finding[] {
 }
 
 function buildSecurityChecks(dataset: ParsedDataset): SecurityCheck[] {
-  const configText = dataset.commandBlocks.filter(block => block.command === "show running-config").flatMap(block => block.lines).map(line => line.text).join("\n");
-  return [
-    {
-      id: "dhcp-snooping",
-      name: "DHCP Snooping",
-      status: /ip dhcp snooping/i.test(configText) ? "Passed" : "Unknown",
-      severity: "Medium",
-      evidence: findEvidence(dataset, /ip dhcp snooping/i),
-      recommendation: "Enable DHCP Snooping on access VLANs where supported and trust only uplinks."
-    },
-    {
-      id: "dynamic-arp-inspection",
-      name: "Dynamic ARP Inspection",
-      status: /ip arp inspection/i.test(configText) ? "Passed" : "Unknown",
-      severity: "Medium",
-      evidence: findEvidence(dataset, /ip arp inspection/i),
-      recommendation: "Enable DAI on user VLANs after DHCP Snooping bindings are validated."
-    },
-    {
-      id: "port-security",
-      name: "Port Security",
-      status: /switchport port-security/i.test(configText) ? "Passed" : "Warning",
-      severity: "Low",
-      evidence: findEvidence(dataset, /switchport port-security/i),
-      recommendation: "Use port-security, 802.1X, or NAC controls on access ports according to site policy."
-    },
-    {
-      id: "plain-secrets",
-      name: "Plaintext Secret Exposure",
-      status: /(password|secret|community)\s+\S+/i.test(configText) ? "Warning" : "Passed",
-      severity: "High",
-      evidence: findEvidence(dataset, /(password|secret|community)\s+\S+/i),
-      recommendation: "Mask credentials before sharing CLI output and rotate exposed secrets if needed."
-    }
-  ];
-}
-
-function findEvidence(dataset: ParsedDataset, pattern: RegExp) {
-  return dataset.commandBlocks.flatMap(block => block.lines.filter(line => pattern.test(line.text)));
+  const configBlocks = dataset.commandBlocks.filter(block => block.command === "show running-config");
+  if (!configBlocks.length) {
+    return [
+      { id: "dhcp-snooping-unknown", name: "DHCP Snooping", status: "Unknown", severity: "Medium", evidence: [], recommendation: "Collect show running-config and show ip dhcp snooping to verify this control." },
+      { id: "dynamic-arp-inspection-unknown", name: "Dynamic ARP Inspection", status: "Unknown", severity: "Medium", evidence: [], recommendation: "Collect show running-config and show ip arp inspection to verify this control." },
+      { id: "port-security-unknown", name: "Port Security", status: "Unknown", severity: "Low", evidence: [], recommendation: "Collect show running-config and show port-security to verify this control." },
+      { id: "plain-secrets-unknown", name: "Plaintext Secret Exposure", status: "Unknown", severity: "High", evidence: [], recommendation: "Run sensitive-data masking before sharing configuration output." }
+    ];
+  }
+  return configBlocks.flatMap(block => {
+    const configText = block.lines.map(line => line.text).join("\n");
+    const evidence = (pattern: RegExp, redact = false) => block.lines
+      .filter(line => pattern.test(line.text))
+      .map(line => redact ? { ...line, text: line.text.replace(/^(?:username\s+\S+\s+.*(?:secret|password)|snmp-server community\s+)\S+/i, "[REDACTED CONFIGURATION]") } : line);
+    return [
+      { id: `dhcp-snooping-${block.id}`, name: "DHCP Snooping", status: /ip dhcp snooping/i.test(configText) ? "Passed" : "Unknown", severity: "Medium", evidence: evidence(/ip dhcp snooping/i), recommendation: "Enable DHCP Snooping on access VLANs where supported and trust only uplinks." },
+      { id: `dynamic-arp-inspection-${block.id}`, name: "Dynamic ARP Inspection", status: /ip arp inspection/i.test(configText) ? "Passed" : "Unknown", severity: "Medium", evidence: evidence(/ip arp inspection/i), recommendation: "Enable DAI on user VLANs after DHCP Snooping bindings are validated." },
+      { id: `port-security-${block.id}`, name: "Port Security", status: /switchport port-security/i.test(configText) ? "Passed" : "Warning", severity: "Low", evidence: evidence(/switchport port-security/i), recommendation: "Use port-security, 802.1X, or NAC controls on access ports according to site policy." },
+      { id: `plain-secrets-${block.id}`, name: "Plaintext Secret Exposure", status: /(password|secret|community)\s+\S+/i.test(configText) ? "Warning" : "Passed", severity: "High", evidence: evidence(/(password|secret|community)\s+\S+/i, true), recommendation: "Mask credentials before sharing CLI output and rotate exposed secrets if needed." }
+    ] as SecurityCheck[];
+  });
 }
 
 function buildRecommendedCommands(findings: Finding[]): string[] {

@@ -5,6 +5,8 @@ import { Background, Controls, ReactFlow, type Edge, type Node } from "@xyflow/r
 import {
   Activity,
   Calendar,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   CircuitBoard,
   ClipboardList,
@@ -22,26 +24,31 @@ import {
   Trash2,
   Upload
 } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useTheme } from "next-themes";
 import { NAV_ITEMS, type ViewId } from "@/constants/navigation";
 import { SAMPLE_DATA } from "@/constants/sample-data";
 import { type Language, translations } from "@/constants/translations";
 import { analyzeCli } from "@/parsers";
 import { exportExcel, exportJson, exportMarkdown, exportPdf } from "@/services/export/report-export";
-import { sanitizeCli, scanSensitiveData } from "@/services/sanitization/sanitizer";
+import { createSanitizationPreview, DEFAULT_SANITIZATION_OPTIONS, type SanitizationOptions } from "@/services/sanitization/sanitizer";
 import { useAnalysisStore } from "@/store/analysis-store";
 import type { AnalysisResult, Finding, IpInventoryRecord, SecurityCheck, Severity } from "@/types/network";
+import { scopeFromEvidence, scopeKey } from "@/evidence/evidence-scope";
 import { ipInSubnet, ipToNumber } from "@/utils/ip";
 import { AuditModal } from "@/components/audit-modal";
+import { SanitizationDialog } from "@/components/sanitization-dialog";
+import { CollectionProfilePanel } from "@/features/troubleshooting/collection-profile-panel";
+import { IncidentTimeline } from "@/features/incidents/incident-timeline";
 import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
 import { SubnetCheckDetails } from "@/components/subnet-check-details";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RecordTable } from "@/components/tables/record-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import type { ColumnDef } from "@tanstack/react-table";
 
 type Copy = (typeof translations)["en"] | (typeof translations)["th"];
 type MetricFocus =
@@ -88,24 +95,32 @@ const recommendedCollection = [
 
 export function NetScopeApp({ initialView }: { initialView: ViewId }) {
   const { theme, setTheme } = useTheme();
-  const { cliText, result, progress, setCliText, setResult, setProgress, clear } = useAnalysisStore();
+  const { rawCliText, sanitizedCliText, result, progressMessage, progressPercent, setRawCliText, generateSanitizedText, resetSanitization, startAnalysis, setProgress, setResult, setError, clearSession } = useAnalysisStore();
   const [activeView, setActiveView] = useState<ViewId>(initialView);
   const [language, setLanguage] = useState<Language>("th");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [metricFocus, setMetricFocus] = useState<MetricFocus | null>(null);
+  const [sanitizationOpen, setSanitizationOpen] = useState(false);
+  const [sanitizationOptions, setSanitizationOptions] = useState<SanitizationOptions>(DEFAULT_SANITIZATION_OPTIONS);
   const t = translations[language];
-  const sensitiveHits = useMemo(() => scanSensitiveData(cliText), [cliText]);
-  const preview = useMemo(() => buildPreview(cliText), [cliText]);
+  const sanitizationPreview = useMemo(() => createSanitizationPreview(rawCliText, sanitizationOptions), [rawCliText, sanitizationOptions]);
+  const sensitiveHits = sanitizationPreview.hits;
+  const preview = useMemo(() => buildPreview(rawCliText), [rawCliText]);
   const criticalCount = result?.findings.filter(finding => finding.severity === "Critical").length ?? 0;
 
   async function analyze() {
-    if (!cliText.trim()) return;
+    if (!rawCliText.trim()) return;
     setBusy(true);
-    setProgress(t.uploadMode);
+    startAnalysis();
     try {
-      setResult(await runAnalysis(cliText));
+      setProgress("detecting", 20, "Detecting command blocks");
+      const nextResult = await runAnalysis(rawCliText);
+      setProgress("correlating", 80, "Correlating IP, MAC, DHCP, and security evidence");
+      setResult(nextResult);
       if (activeView === "import") setActiveView("overview");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Analysis failed");
     } finally {
       setBusy(false);
     }
@@ -128,21 +143,25 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
             setLanguage={setLanguage}
             theme={theme}
             setTheme={setTheme}
-            onLoadSample={() => setCliText(SAMPLE_DATA)}
+            onLoadSample={() => setRawCliText(SAMPLE_DATA)}
           />
 
           <StatusPills t={t} result={result} preview={preview} />
 
           <AnalyzerPanel
             t={t}
-            cliText={cliText}
-            setCliText={setCliText}
+            cliText={rawCliText}
+            setCliText={setRawCliText}
             busy={busy}
             analyze={analyze}
-            clear={clear}
+            clear={clearSession}
             sensitiveHits={sensitiveHits}
-            progress={progress}
+            progress={`${progressPercent}% · ${progressMessage}`}
             preview={preview}
+            onSanitize={() => {
+              generateSanitizedText(sanitizationOptions);
+              setSanitizationOpen(true);
+            }}
             onRecommended={() => {
               setMetricFocus(null);
               setActiveView("troubleshooting");
@@ -150,6 +169,22 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
             onExport={() => {
               setMetricFocus(null);
               setActiveView("reports");
+            }}
+          />
+
+          <SanitizationDialog
+            open={sanitizationOpen}
+            onClose={() => setSanitizationOpen(false)}
+            rawCliText={rawCliText}
+            sanitizedCliText={sanitizedCliText}
+            preview={sanitizationPreview}
+            options={sanitizationOptions}
+            labels={t.sanitization}
+            onOptionsChange={setSanitizationOptions}
+            onGenerate={() => generateSanitizedText(sanitizationOptions)}
+            onReset={() => {
+              resetSanitization();
+              setSanitizationOptions(DEFAULT_SANITIZATION_OPTIONS);
             }}
           />
 
@@ -173,12 +208,15 @@ export function NetScopeApp({ initialView }: { initialView: ViewId }) {
           <section id="analysis-detail" className="rounded-[1.35rem] border border-cyan-400/30 bg-[#031128]/80 p-3 shadow-[0_0_42px_rgba(0,217,255,0.16)]">
             {!result && activeView !== "import" ? <EmptyState t={t} onOpenImport={() => setActiveView("import")} /> : null}
             {activeView === "import" ? (
-              <ImportDetails t={t} result={result} sensitiveHits={sensitiveHits} progress={progress} />
+              <ImportDetails t={t} result={result} sensitiveHits={sensitiveHits} progress={`${progressPercent}% · ${progressMessage}`} />
             ) : null}
             {result && activeView !== "import" ? (
               metricFocus
                 ? <MetricDrilldown focus={metricFocus} result={result} t={t} language={language} />
-                : <ViewRouter view={activeView} result={result} query={query} setQuery={setQuery} t={t} language={language} />
+                : <ViewRouter view={activeView} result={result} query={query} setQuery={setQuery} t={t} language={language} onOpenView={(view, focus) => {
+                  setMetricFocus(focus ?? null);
+                  setActiveView(view);
+                }} />
             ) : null}
           </section>
         </main>
@@ -276,7 +314,8 @@ function AnalyzerPanel({
   progress,
   preview,
   onRecommended,
-  onExport
+  onExport,
+  onSanitize
 }: {
   t: Copy;
   cliText: string;
@@ -289,6 +328,7 @@ function AnalyzerPanel({
   preview: Preview;
   onRecommended: () => void;
   onExport: () => void;
+  onSanitize: () => void;
 }) {
   return (
     <Card className="cyber-border-energy cyber-light-sweep rounded-[1.35rem]">
@@ -321,7 +361,7 @@ function AnalyzerPanel({
             <ClipboardList className="h-4 w-4" />
             {t.loadSample}
           </Button>
-          <Button variant="outline" onClick={() => setCliText(sanitizeCli(cliText, "mask"))}>
+          <Button variant="outline" onClick={onSanitize} disabled={!cliText.trim()}>
             <ShieldAlert className="h-4 w-4" />
             {t.sanitize}
           </Button>
@@ -500,7 +540,8 @@ function ViewRouter({
   query,
   setQuery,
   t,
-  language
+  language,
+  onOpenView
 }: {
   view: ViewId;
   result: AnalysisResult;
@@ -508,22 +549,25 @@ function ViewRouter({
   setQuery: (query: string) => void;
   t: Copy;
   language: Language;
+  onOpenView: (view: ViewId, focus?: MetricFocus) => void;
 }) {
   switch (view) {
     case "overview":
-      return <Overview result={result} t={t} />;
+      return <Overview result={result} t={t} onOpenView={onOpenView} />;
+    case "configuration":
+      return <Configuration result={result} t={t} language={language} />;
     case "ip-inventory":
-      return <IpTable title={t.tabs["ip-inventory"]} rows={filterInventory(result.ipInventory, query)} query={query} setQuery={setQuery} t={t} />;
+      return <IpTable title={t.tabs["ip-inventory"]} rows={result.ipInventory} filter={query} setFilter={setQuery} t={t} />;
     case "free-ip":
-      return <IpTable title={t.tabs["free-ip"]} rows={filterInventory(result.freeIps, query)} query={query} setQuery={setQuery} t={t} />;
+      return <IpTable title={t.tabs["free-ip"]} rows={result.freeIps} filter={query} setFilter={setQuery} t={t} />;
     case "used-ip":
-      return <IpTable title={t.tabs["used-ip"]} rows={filterInventory(result.usedIps, query)} query={query} setQuery={setQuery} t={t} />;
+      return <IpTable title={t.tabs["used-ip"]} rows={result.usedIps} filter={query} setFilter={setQuery} t={t} />;
     case "devices":
       return <Devices result={result} t={t} />;
     case "vlans":
-      return <Vlans result={result} t={t} />;
+      return <Vlans result={result} t={t} language={language} />;
     case "conflicts":
-      return <Findings title={t.tabs.conflicts} findings={result.findings.filter(f => f.category !== "Security")} t={t} language={language} />;
+      return <ConflictsView result={result} t={t} language={language} />;
     case "security":
       return <Security result={result} t={t} />;
     case "blocked-devices":
@@ -539,8 +583,17 @@ function ViewRouter({
     case "import":
       return <ImportDetails t={t} result={result} sensitiveHits={[]} progress="" />;
     default:
-      return <Overview result={result} t={t} />;
+      return <Overview result={result} t={t} onOpenView={onOpenView} />;
   }
+}
+
+function ConflictsView({ result, t, language }: { result: AnalysisResult; t: Copy; language: Language }) {
+  return (
+    <div className="space-y-4">
+      <IncidentTimeline incidents={result.incidents} labels={t.incidents} />
+      <Findings title={t.tabs.conflicts} findings={result.findings.filter(finding => finding.category !== "Security")} t={t} language={language} />
+    </div>
+  );
 }
 
 function ImportDetails({
@@ -614,47 +667,95 @@ function ImportDetails({
   );
 }
 
-function Overview({ result, t }: { result: AnalysisResult; t: Copy }) {
-  const issueData = ["Critical", "High", "Medium", "Low"].map(severity => ({
-    severity: translateSeverity(severity as Severity, t),
-    count: result.findings.filter(finding => finding.severity === severity).length
-  }));
-  const ipData = [
-    { name: t.metrics.used, value: result.usedIps.length },
-    { name: t.metrics.free, value: result.freeIps.length },
-    { name: t.metrics.reserved, value: result.ipInventory.filter(item => item.status === "Reserved").length },
-    { name: t.metrics.unknown, value: result.ipInventory.filter(item => item.status === "Unknown").length }
-  ];
+type AuditCategoryId = keyof (typeof translations)["en"]["audit"]["categories"];
+type AuditState = "normal" | "review" | "issue" | "noData";
 
+type AuditCategory = {
+  id: AuditCategoryId;
+  count: number;
+  state: AuditState;
+  sources: string[];
+  view?: ViewId;
+  metricFocus?: MetricFocus;
+};
+
+function Overview({ result, t, onOpenView }: { result: AnalysisResult; t: Copy; onOpenView: (view: ViewId, focus?: MetricFocus) => void }) {
+  return <VerificationSummary result={result} t={t} onOpenView={onOpenView} />;
+}
+
+function VerificationSummary({ result, t, onOpenView }: { result: AnalysisResult; t: Copy; onOpenView: (view: ViewId, focus?: MetricFocus) => void }) {
+  const [expanded, setExpanded] = useState<AuditCategoryId[]>([]);
+  const [selectedId, setSelectedId] = useState<AuditCategoryId | null>(null);
+  const categories = useMemo(() => buildAuditCategories(result), [result]);
+  const selected = categories.find(category => category.id === selectedId);
+  const allIds = categories.map(category => category.id);
+  const stateLabel = (state: AuditState) => t.audit[state];
+  const stateSeverity = (state: AuditState): Severity => state === "normal" ? "Passed" : state === "review" ? "Medium" : state === "issue" ? "High" : "Info";
   return (
-    <div className="space-y-4">
-      <CommandCoverage result={result} t={t} />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ChartCard title={t.panels.ipStatus}>
-          <ResponsiveContainer width="100%" height={240}>
-            <PieChart>
-              <Pie data={ipData} dataKey="value" outerRadius={90} label>
-                {ipData.map((entry, index) => <Cell key={entry.name} fill={["#20e39a", "#39efff", "#a855f7", "#8daac2"][index]} />)}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </ChartCard>
-        <ChartCard title={t.panels.issueSeverity}>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={issueData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,217,255,0.12)" />
-              <XAxis dataKey="severity" />
-              <YAxis allowDecimals={false} />
-              <Tooltip />
-              <Bar dataKey="count" fill="#39efff" />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </div>
-      <Findings title={t.panels.criticalFindings} findings={result.findings.slice(0, 6)} t={t} language={isThaiCopy(t) ? "th" : "en"} />
-    </div>
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><CardTitle>{t.audit.title}</CardTitle><CardDescription>{t.audit.subtitle}</CardDescription></div>
+          <div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setExpanded(allIds)}>{t.audit.showAll}</Button><Button type="button" size="sm" variant="outline" onClick={() => setExpanded([])}>{t.audit.collapseAll}</Button></div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 lg:grid-cols-2">
+        {categories.map(category => {
+          const isExpanded = expanded.includes(category.id);
+          return (
+            <section key={category.id} className="rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold text-cyan-50">{t.audit.categories[category.id]}</h2><p className="mt-1 text-xs text-muted-foreground">{category.count} {t.audit.records} · {category.sources.length} {t.audit.sources}</p></div><Badge severity={stateSeverity(category.state)}>{stateLabel(category.state)}</Badge></div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{auditCategorySummary(category, t)}</p>
+              <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" onClick={() => setSelectedId(category.id)}>{t.audit.viewDetails}</Button><Button type="button" size="sm" variant="outline" onClick={() => setExpanded(current => current.includes(category.id) ? current : [...current, category.id])}>{t.audit.showAll}</Button><Button type="button" size="sm" variant="ghost" onClick={() => setExpanded(current => current.filter(id => id !== category.id))}>{t.audit.collapseAll}</Button></div>
+              {isExpanded ? <div className="mt-3 border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.table.sources}:</span>{" "}{category.sources.join(", ") || t.states.noEvidence}</div> : null}
+            </section>
+          );
+        })}
+      </CardContent>
+      <AuditModal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selected ? t.audit.categories[selected.id] : ""} subtitle={selected ? `${selected.count} ${t.audit.records} · ${stateLabel(selected.state)}` : ""}>
+        {selected ? <div className="space-y-4 text-sm"><div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3"><div className="flex items-center gap-2"><Badge severity={stateSeverity(selected.state)}>{stateLabel(selected.state)}</Badge><span>{selected.count} {t.audit.records}</span></div><p className="mt-3 leading-6 text-muted-foreground">{auditCategorySummary(selected, t)}</p></div><div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3"><div className="text-sm font-medium">{t.table.sources}</div><p className="mt-2 break-words font-mono text-xs text-cyan-100/80">{selected.sources.join(", ") || t.states.noEvidence}</p></div>{selected.view || selected.metricFocus ? <Button type="button" onClick={() => { setSelectedId(null); onOpenView(selected.view ?? "overview", selected.metricFocus); }}>{t.audit.openWorkspace}</Button> : null}</div> : null}
+      </AuditModal>
+    </Card>
   );
+}
+
+function buildAuditCategories(result: AnalysisResult): AuditCategory[] {
+  const sources = (commands: string[]) => [...new Set(result.commandBlocks.filter(block => commands.includes(block.command)).map(block => block.rawCommand))];
+  const withState = (id: AuditCategoryId, count: number, sourceCommands: string[], view?: ViewId, issues = 0, metricFocus?: MetricFocus): AuditCategory => {
+    const actualSources = sources(sourceCommands);
+    return { id, count, sources: actualSources, view, metricFocus, state: !count && !actualSources.length ? "noData" : issues ? "issue" : !count ? "review" : "normal" };
+  };
+  const config = (feature: string) => result.configFeatures.filter(item => item.feature === feature).length;
+  const configCategory = (category: string) => result.configFeatures.filter(item => item.category === category).length;
+  return [
+    withState("device", result.devices.length + result.interfaces.length, ["show running-config", "show ip interface brief", "show interfaces status"], "devices"),
+    withState("ipSubnet", result.ipInventory.length + result.subnets.length, ["show ip arp", "show arp", "show ip dhcp binding", "show ip interface brief"], "ip-inventory", result.findings.filter(item => /duplicate ip|gateway.*mismatch|overlap/i.test(item.title)).length),
+    withState("routing", result.staticRoutes.length + result.vrfs.length, ["show ip route", "show vrf", "show running-config"], "configuration"),
+    withState("vlan", result.vlans.length + result.interfaces.filter(item => item.vlan !== undefined).length, ["show vlan brief", "show interfaces status", "show interfaces switchport"], "vlans"),
+    withState("trunk", result.interfaces.filter(item => item.mode === "trunk").length, ["show interfaces trunk", "show running-config"], "vlans"),
+    withState("mac", result.macTable.length, ["show mac address-table"], "ip-inventory", result.findings.filter(item => /mac.*flap|mac.*movement/i.test(item.title)).length),
+    withState("arp", result.arp.length, ["show ip arp", "show arp"], "ip-inventory"),
+    withState("pool", result.dhcpPools.filter(pool => pool.poolType !== "Reservation").length, ["show ip dhcp pool", "show running-config"], undefined, result.findings.filter(item => /dhcp.*pool|pool.*dhcp/i.test(item.title)).length, "pools"),
+    withState("binding", result.dhcpBindings.length, ["show ip dhcp binding"], "ip-inventory"),
+    withState("excluded", result.dhcpExcludedRanges.length, ["show running-config"], undefined),
+    withState("reserved", result.ipInventory.filter(item => item.status === "Reserved").length, ["show running-config", "show ip dhcp binding"], "ip-inventory"),
+    withState("stp", result.interfaces.filter(item => item.stpRole || item.stpState).length, ["show spanning-tree", "show spanning-tree detail"], "vlans"),
+    withState("etherchannel", result.interfaces.filter(item => item.channelGroup).length, ["show etherchannel summary"], "vlans"),
+    withState("acl", result.accessLists.length, ["show access-lists", "show ip access-lists", "show running-config"], "configuration"),
+    withState("nat", config("NAT"), ["show running-config"], "configuration"),
+    withState("security", result.securityChecks.length + configCategory("Security"), ["show running-config", "show ip dhcp snooping", "show ip arp inspection"], "security", result.securityChecks.filter(check => check.status === "Warning" || check.status === "Failed").length),
+    withState("neighbor", result.topology.length, ["show cdp neighbors detail", "show lldp neighbors detail"], "topology"),
+    withState("parser", result.parserWarnings.length, result.parserWarnings.flatMap(item => item.evidence.map(evidence => evidence.command)), "import", result.parserWarnings.length),
+    withState("conflict", result.findings.length + result.dhcpConflicts.length + result.blockedDevices.length, ["show logging", "show ip dhcp conflict", "show ip arp", "show mac address-table"], "conflicts", result.findings.length + result.dhcpConflicts.length + result.blockedDevices.length),
+    withState("topology", result.topology.length, ["show cdp neighbors detail", "show lldp neighbors detail"], "topology"),
+  ];
+}
+
+function auditCategorySummary(category: AuditCategory, t: Copy): string {
+  if (category.state === "noData") return t.states.noEvidence;
+  if (category.state === "issue") return `${t.audit.issue}: ${category.count} ${t.audit.records}`;
+  if (category.state === "review") return `${t.audit.review}: ${category.count} ${t.audit.records}`;
+  return `${t.audit.normal}: ${category.count} ${t.audit.records}`;
 }
 
 function CommandCoverage({ result, t }: { result: AnalysisResult; t: Copy }) {
@@ -728,13 +829,13 @@ function MetricDrilldown({ focus, result, t, language }: { focus: MetricFocus; r
     case "usable":
       return <SubnetTable result={result} t={t} />;
     case "used":
-      return <IpTable title={t.metrics.used} rows={result.usedIps} query="" setQuery={() => undefined} t={t} />;
+      return <IpTable title={t.metrics.used} rows={result.usedIps} t={t} />;
     case "free":
-      return <IpTable title={t.metrics.free} rows={result.freeIps} query="" setQuery={() => undefined} t={t} />;
+      return <IpTable title={t.metrics.free} rows={result.freeIps} t={t} />;
     case "reserved":
-      return <IpTable title={t.metrics.reserved} rows={result.ipInventory.filter(row => row.status === "Reserved")} query="" setQuery={() => undefined} t={t} />;
+      return <IpTable title={t.metrics.reserved} rows={result.ipInventory.filter(row => row.status === "Reserved")} t={t} />;
     case "unknown":
-      return <IpTable title={t.metrics.unknown} rows={result.ipInventory.filter(row => row.status === "Unknown")} query="" setQuery={() => undefined} t={t} />;
+      return <IpTable title={t.metrics.unknown} rows={result.ipInventory.filter(row => row.status === "Unknown")} t={t} />;
     case "pools":
       return <DhcpPools result={result} t={t} />;
     case "posture":
@@ -752,9 +853,10 @@ function MetricDrilldown({ focus, result, t, language }: { focus: MetricFocus; r
 }
 
 function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
-  const [selectedCidr, setSelectedCidr] = useState(result.subnets[0]?.cidr ?? "");
+  const [selectedId, setSelectedId] = useState(result.subnets[0]?.id ?? "");
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const selected = result.subnets.find(subnet => subnet.cidr === selectedCidr) ?? result.subnets[0];
+  const subnetPage = useRecordPage(result.subnets);
+  const selected = result.subnets.find(subnet => subnet.id === selectedId) ?? result.subnets[0];
   return (
     <Card>
       <CardHeader>
@@ -763,14 +865,14 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
       </CardHeader>
       <CardContent>
         <DataTable headers={["CIDR", "Network", "First Host", "Last Host", t.metrics.usable, t.metrics.used, t.metrics.free, "%"]}>
-          {result.subnets.map(subnet => (
+          {subnetPage.items.map(subnet => (
             <TableRow
-              key={subnet.cidr}
+              key={subnet.id}
               onClick={() => {
-                setSelectedCidr(subnet.cidr);
+                setSelectedId(subnet.id);
                 setDetailsOpen(true);
               }}
-              className={cn("cursor-pointer", selected?.cidr === subnet.cidr && "bg-cyan-400/10")}
+              className={cn("cursor-pointer", selected?.id === subnet.id && "bg-cyan-400/10")}
             >
               <TableCell className="font-mono">{subnet.cidr}</TableCell>
               <TableCell className="font-mono">{subnet.network}</TableCell>
@@ -783,17 +885,7 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
             </TableRow>
           ))}
         </DataTable>
-        {selected ? (
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
-            <div className="font-mono text-cyan-100">{selected.cidr}</div>
-            <div>{t.metrics.used}: {selected.used}</div>
-            <div>{t.metrics.free}: {selected.free}</div>
-            <div>{t.metrics.score}: {selected.utilization}%</div>
-            <Button type="button" size="sm" onClick={() => setDetailsOpen(true)}>
-              Open selected subnet audit
-            </Button>
-          </div>
-        ) : null}
+        <RecordPager page={subnetPage.page} pageCount={subnetPage.pageCount} total={result.subnets.length} onPageChange={subnetPage.setPage} />
         {selected ? (
           <AuditModal
             open={detailsOpen}
@@ -810,9 +902,10 @@ function SubnetTable({ result, t }: { result: AnalysisResult; t: Copy }) {
 }
 
 function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
-  const [selectedName, setSelectedName] = useState(result.dhcpPools[0]?.name ?? "");
+  const [selectedKey, setSelectedKey] = useState(result.dhcpPools[0] ? dhcpPoolKey(result.dhcpPools[0]) : "");
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const selected = result.dhcpPools.find(pool => pool.name === selectedName) ?? result.dhcpPools[0];
+  const poolPage = useRecordPage(result.dhcpPools);
+  const selected = result.dhcpPools.find(pool => dhcpPoolKey(pool) === selectedKey) ?? result.dhcpPools[0];
   const selectedStats = selected ? poolStats(result, selected) : null;
   return (
     <Card>
@@ -822,14 +915,14 @@ function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
       </CardHeader>
       <CardContent>
         <DataTable headers={["Pool", "Network", "Leased", "Pool free", "Excluded", "Reserved", "Conflict", "%", "Gateway"]}>
-          {result.dhcpPools.map(pool => (
+          {poolPage.items.map(pool => (
             <TableRow
-              key={pool.name}
+              key={dhcpPoolKey(pool)}
               onClick={() => {
-                setSelectedName(pool.name);
+                setSelectedKey(dhcpPoolKey(pool));
                 setDetailsOpen(true);
               }}
-              className={cn("cursor-pointer", selected?.name === pool.name && "bg-cyan-400/10")}
+              className={cn("cursor-pointer", selected && dhcpPoolKey(selected) === dhcpPoolKey(pool) && "bg-cyan-400/10")}
             >
               {(() => {
                 const stats = poolStats(result, pool);
@@ -850,6 +943,7 @@ function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
             </TableRow>
           ))}
         </DataTable>
+        <RecordPager page={poolPage.page} pageCount={poolPage.pageCount} total={result.dhcpPools.length} onPageChange={poolPage.setPage} />
         {selected && selectedStats ? (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
             <div className="font-mono text-cyan-100">{selected.name}</div>
@@ -867,7 +961,7 @@ function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
             title={`DHCP pool detail: ${selected.name}`}
             subtitle={`${selected.network ?? "-"}/${selected.prefix ?? "-"} · pool free is not reusable free IP`}
           >
-            <DhcpPoolDetail pool={selected} stats={selectedStats} />
+            <DhcpPoolDetail pool={selected} stats={selectedStats} t={t} />
           </AuditModal>
         ) : null}
       </CardContent>
@@ -875,7 +969,117 @@ function DhcpPools({ result, t }: { result: AnalysisResult; t: Copy }) {
   );
 }
 
-function DhcpPoolDetail({ pool, stats }: { pool: AnalysisResult["dhcpPools"][number]; stats: ReturnType<typeof poolStats> }) {
+type PoolAuditEntity = {
+  id: string;
+  label: string;
+  fields: Array<[string, string]>;
+  evidence: AnalysisResult["dhcpPools"][number]["evidence"];
+};
+
+type PoolAuditCheck = {
+  id: "scope" | "leases" | "excluded" | "reservations" | "conflicts" | "services" | "source";
+  label: string;
+  severity: Severity;
+  summary: string;
+  fields: Array<[string, string]>;
+  evidence: AnalysisResult["dhcpPools"][number]["evidence"];
+  entities?: PoolAuditEntity[];
+};
+
+function DhcpPoolDetail({ pool, stats, t }: { pool: AnalysisResult["dhcpPools"][number]; stats: ReturnType<typeof poolStats>; t: Copy }) {
+  const [selectedCheckId, setSelectedCheckId] = useState<PoolAuditCheck["id"]>("scope");
+  const reservationEntities: PoolAuditEntity[] = stats.reservationsRows.map((item, index) => ({
+    id: `reservation-${item.host}-${index}`,
+    label: item.host ?? item.name,
+    fields: [
+      [t.table.ip, item.host ?? "-"],
+      [t.table.mac, item.hardwareAddress ?? "-"],
+      ["Client ID", item.clientIdentifier ?? "-"],
+      [t.table.description, item.description ?? "-"],
+    ],
+    evidence: item.evidence,
+  }));
+  const excludedEntities: PoolAuditEntity[] = stats.excludedRanges.map((item, index) => ({
+    id: `excluded-${item.startIp}-${item.endIp}-${index}`,
+    label: item.startIp === item.endIp ? item.startIp : `${item.startIp} - ${item.endIp}`,
+    fields: [["Start IP", item.startIp], ["End IP", item.endIp], ["VRF", item.vrf ?? "global"]],
+    evidence: item.evidence,
+  }));
+  const conflictEntities: PoolAuditEntity[] = stats.conflictRows.map((item, index) => ({
+    id: `conflict-${item.ip}-${index}`,
+    label: item.ip,
+    fields: [[t.table.ip, item.ip], ["Method", item.detectionMethod ?? "-"], ["Time", item.detectionTime ?? "-"]],
+    evidence: item.evidence,
+  }));
+  const leaseEntities: PoolAuditEntity[] = stats.bindingRows.map((item, index) => ({
+    id: `binding-${item.ip}-${index}`,
+    label: item.ip,
+    fields: [[t.table.ip, item.ip], [t.table.mac, item.mac ?? "-"], [t.table.status, item.state ?? "-"], ["Lease", item.lease ?? "-"], ["Client ID", item.clientIdentifier ?? "-"]],
+    evidence: item.evidence,
+  }));
+  const checks: PoolAuditCheck[] = [
+    {
+      id: "scope",
+      label: t.dhcpAudit.poolScope,
+      severity: pool.network && pool.prefix !== undefined ? "Passed" : "Medium",
+      summary: pool.network && pool.prefix !== undefined ? `${pool.network}/${pool.prefix} · ${pool.total ?? 0} addresses` : "Network or prefix is not confirmed from the imported CLI.",
+      fields: [["Network", pool.network ? `${pool.network}/${pool.prefix ?? "-"}` : "-"], ["Reservation host", pool.host ?? "-"], ["Total addresses", String(pool.total ?? 0)], ["Utilization", pool.utilization === undefined ? "-" : `${pool.utilization}%`]],
+      evidence: pool.evidence,
+    },
+    {
+      id: "leases",
+      label: t.dhcpAudit.leaseEvidence,
+      severity: stats.bindingRows.length || pool.leased !== undefined ? "Info" : "Medium",
+      summary: `${stats.leased} leased reported · ${stats.bindingRows.length} binding records imported`,
+      fields: [["Reported leased", String(stats.leased)], ["Bindings imported", String(stats.bindingRows.length)], ["Pool free (DHCP only)", String(stats.poolFree)]],
+      evidence: stats.bindingRows.flatMap(item => item.evidence),
+      entities: leaseEntities,
+    },
+    {
+      id: "excluded",
+      label: t.dhcpAudit.excluded,
+      severity: "Info",
+      summary: `${stats.excluded} address(es) excluded across ${excludedEntities.length} range(s)`,
+      fields: [["Excluded addresses", String(stats.excluded)], ["Excluded ranges", String(excludedEntities.length)]],
+      evidence: stats.excludedRanges.flatMap(item => item.evidence),
+      entities: excludedEntities,
+    },
+    {
+      id: "reservations",
+      label: t.dhcpAudit.reservations,
+      severity: "Info",
+      summary: `${reservationEntities.length} reservation record(s) are inside this pool`,
+      fields: [["Reservations", String(reservationEntities.length)], ["Pool free after reservations", String(stats.poolFree)]],
+      evidence: stats.reservationsRows.flatMap(item => item.evidence),
+      entities: reservationEntities,
+    },
+    {
+      id: "conflicts",
+      label: t.dhcpAudit.conflicts,
+      severity: conflictEntities.length ? "High" : "Passed",
+      summary: conflictEntities.length ? `${conflictEntities.length} conflict record(s) require review` : "No DHCP conflict record was imported for this pool.",
+      fields: [["Conflicts", String(conflictEntities.length)]],
+      evidence: stats.conflictRows.flatMap(item => item.evidence),
+      entities: conflictEntities,
+    },
+    {
+      id: "services",
+      label: t.dhcpAudit.services,
+      severity: pool.defaultRouters.length || pool.dnsServers.length ? "Passed" : "Info",
+      summary: `${pool.defaultRouters.length} gateway(s) · ${pool.dnsServers.length} DNS server(s)`,
+      fields: [["Gateway", pool.defaultRouters.join(", ") || "-"], ["DNS", pool.dnsServers.join(", ") || "-"], ["Lease", pool.lease ?? "device default"], ["Domain", pool.domainName ?? "-"], ["Options", String(pool.options?.length ?? 0)]],
+      evidence: pool.evidence,
+    },
+    {
+      id: "source",
+      label: t.dhcpAudit.sourceEvidence,
+      severity: pool.evidence.length ? "Passed" : "Medium",
+      summary: `${pool.evidence.length} source line(s) confirm this pool configuration`,
+      fields: [["Device", pool.evidence[0]?.device ?? "-"], ["VRF", pool.vrf ?? "global"], ["Evidence lines", String(pool.evidence.length)]],
+      evidence: pool.evidence,
+    },
+  ];
+  const selectedCheck = checks.find(check => check.id === selectedCheckId) ?? checks[0];
   return (
     <div className="space-y-4 text-sm">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -887,20 +1091,61 @@ function DhcpPoolDetail({ pool, stats }: { pool: AnalysisResult["dhcpPools"][num
       <div className="rounded-lg border border-yellow-400/20 bg-yellow-400/5 p-3 text-xs leading-5">
         Pool free means addresses not currently leased inside the DHCP scope. It is not the same as reusable static free IP. Excluded, reserved, conflict, interface, and active binding evidence must be checked first.
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <PoolList title="Excluded ranges" rows={stats.excludedRanges.map(item => `${item.startIp}${item.endIp !== item.startIp ? ` - ${item.endIp}` : ""}`)} />
-        <PoolList title="Reservations" rows={stats.reservationsRows.map(item => `${item.host} · ${item.clientIdentifier ?? item.hardwareAddress ?? "-"}`)} />
-        <PoolList title="Conflicts" rows={stats.conflictRows.map(item => `${item.ip} · ${item.detectionMethod ?? "-"} · ${item.detectionTime ?? "-"}`)} />
-        <PoolList title="Gateway / DNS" rows={[`Gateway: ${pool.defaultRouters.join(", ") || "-"}`, `DNS: ${pool.dnsServers.join(", ") || "-"}`]} />
-      </div>
-      <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-[11px] leading-5 text-cyan-50/80">
-        {pool.evidence.map(line => `${line.device}:${line.line} [${line.command}] ${line.text}`).join("\n") || "No evidence"}
-      </pre>
+      <section className="space-y-3">
+        <div className="text-sm font-semibold text-cyan-50">{t.dhcpAudit.checks}</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {checks.map(check => (
+            <button
+              key={check.id}
+              type="button"
+              onClick={() => setSelectedCheckId(check.id)}
+              className={cn("rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300", selectedCheck.id === check.id ? "border-cyan-300/70 bg-cyan-400/10" : "border-cyan-400/15 bg-slate-950/35 hover:bg-cyan-400/5")}
+            >
+              <div className="flex items-start justify-between gap-2"><span className="text-sm font-medium">{check.label}</span><Badge severity={check.severity}>{t.dhcpAudit.checked}</Badge></div>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{check.summary}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+      <PoolAuditCheckDetail key={selectedCheck.id} check={selectedCheck} t={t} />
     </div>
   );
 }
 
-function DetailMetric({ label, value }: { label: string; value: number }) {
+function PoolAuditCheckDetail({ check, t }: { check: PoolAuditCheck; t: Copy }) {
+  const [selectedEntityId, setSelectedEntityId] = useState("");
+  const selectedEntity = check.entities?.find(entity => entity.id === selectedEntityId);
+  const sourceEvidence = selectedEntity?.evidence ?? check.evidence;
+  return (
+    <section className="rounded-lg border border-cyan-400/25 bg-slate-950/45 p-4">
+      <div className="text-sm font-semibold text-cyan-50">{t.dhcpAudit.selectedCheck}: {check.label}</div>
+      <dl className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+        {check.fields.map(([label, value]) => <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-mono text-xs text-cyan-50">{value}</dd></div>)}
+      </dl>
+      {check.entities?.length ? (
+        <label className="mt-4 grid gap-1 text-xs text-muted-foreground">
+          {t.dhcpAudit.selectRecord}
+          <select value={selectedEntityId} onChange={event => setSelectedEntityId(event.target.value)} className="h-10 rounded-lg border bg-background px-3 font-mono text-sm text-foreground">
+            <option value="">-</option>
+            {check.entities.map(entity => <option key={entity.id} value={entity.id}>{entity.label}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {check.entities && !check.entities.length ? <p className="mt-4 text-xs text-muted-foreground">{t.dhcpAudit.noRecords}</p> : null}
+      {selectedEntity ? (
+        <div className="mt-4 rounded-md border border-cyan-400/15 bg-black/20 p-3">
+          <div className="font-mono text-sm text-cyan-100">{selectedEntity.label}</div>
+          <dl className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            {selectedEntity.fields.map(([label, value]) => <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words font-mono text-xs text-cyan-50">{value}</dd></div>)}
+          </dl>
+        </div>
+      ) : null}
+      <div className="mt-4 border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.dhcpAudit.source}:</span>{" "}{[...new Set(sourceEvidence.map(line => `${line.device} · ${line.command}`))].join(", ") || "-"}</div>
+    </section>
+  );
+}
+
+function DetailMetric({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-lg border border-cyan-400/15 bg-black/20 p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
@@ -909,31 +1154,38 @@ function DetailMetric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function PoolList({ title, rows }: { title: string; rows: string[] }) {
-  return (
-    <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
-      <div className="text-sm font-medium">{title}</div>
-      {rows.length ? <ul className="mt-2 space-y-1 text-xs">{rows.map(row => <li key={row}>- {row}</li>)}</ul> : <p className="mt-2 text-xs text-muted-foreground">-</p>}
-    </div>
-  );
-}
 
 function IpTable({
   title,
   rows,
-  query,
-  setQuery,
+  filter,
+  setFilter,
   t
 }: {
   title: string;
   rows: IpInventoryRecord[];
-  query: string;
-  setQuery: (query: string) => void;
+  filter?: string;
+  setFilter?: (query: string) => void;
   t: Copy;
 }) {
-  const [selectedIp, setSelectedIp] = useState(rows[0]?.ip ?? "");
+  const [selected, setSelected] = useState<IpInventoryRecord | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const selected = rows.find(row => row.ip === selectedIp) ?? rows[0];
+  const columns = useMemo<ColumnDef<IpInventoryRecord, unknown>[]>(() => [
+    { accessorKey: "deviceId", header: t.table.device },
+    { accessorKey: "vrf", header: t.table.vrf },
+    {
+      accessorKey: "ip",
+      header: t.table.ip,
+      sortingFn: (left, right) => (ipToNumber(left.original.ip) ?? 0) - (ipToNumber(right.original.ip) ?? 0),
+    },
+    { accessorKey: "status", header: t.table.status, cell: info => <Badge severity={ipStatusSeverity(info.row.original.status)}>{translateIpStatus(info.row.original.status, t)}</Badge> },
+    { accessorKey: "confidence", header: t.table.confidence, cell: info => `${info.row.original.confidence}%` },
+    { accessorKey: "description", header: t.table.description, cell: info => info.row.original.description ?? "-" },
+    { id: "mac", accessorFn: row => row.macs.join(", "), header: t.table.mac, cell: info => <span className="font-mono">{info.row.original.macs.join(", ") || "-"}</span> },
+    { id: "vlan", accessorFn: row => row.vlans.join(", "), header: t.table.vlan, cell: info => info.row.original.vlans.join(", ") || "-" },
+    { id: "port", accessorFn: row => row.ports.join(", "), header: t.table.ports, cell: info => <span className="font-mono">{info.row.original.ports.join(", ") || "-"}</span> },
+    { id: "sources", accessorFn: row => row.sources.join(", "), header: t.table.sources, cell: info => info.row.original.sources.join(", ") || "-" },
+  ], [t]);
   return (
     <Card>
       <CardHeader>
@@ -941,43 +1193,20 @@ function IpTable({
         <CardDescription>{rows.length} {t.panels.currentRows}</CardDescription>
       </CardHeader>
       <CardContent>
-        <input
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder={t.actions.search}
-          className="mb-3 h-10 w-full rounded-lg border px-3 text-sm"
+        <RecordTable
+          data={rows}
+          columns={columns}
+          filter={filter}
+          onFilterChange={setFilter}
+          labels={t.table}
+          searchText={ipSearchText}
+          getRowId={row => row.id}
+          getRowLabel={row => `${t.table.ip} ${row.ip}`}
+          onRowClick={row => {
+            setSelected(row);
+            setDetailsOpen(true);
+          }}
         />
-        <DataTable headers={[t.table.ip, t.table.status, t.table.confidence, t.table.mac, t.table.vlan, t.table.ports, t.table.sources]}>
-          {rows.map(row => (
-            <TableRow
-              key={row.ip}
-              onClick={() => {
-                setSelectedIp(row.ip);
-                setDetailsOpen(true);
-              }}
-              className={cn("cursor-pointer", selected?.ip === row.ip && "bg-cyan-400/10")}
-            >
-              <TableCell className="font-mono">{row.ip}</TableCell>
-              <TableCell><Badge severity={ipStatusSeverity(row.status)}>{translateIpStatus(row.status, t)}</Badge></TableCell>
-              <TableCell>{row.confidence}%</TableCell>
-              <TableCell className="font-mono">{row.macs.join(", ") || "-"}</TableCell>
-              <TableCell>{row.vlans.join(", ") || "-"}</TableCell>
-              <TableCell className="font-mono">{row.ports.join(", ") || "-"}</TableCell>
-              <TableCell>{row.sources.join(", ")}</TableCell>
-            </TableRow>
-          ))}
-        </DataTable>
-        {selected ? (
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-400/15 bg-slate-950/35 p-3 text-xs">
-            <div className="font-mono text-cyan-100">{selected.ip}</div>
-            <div>{t.table.status}: {translateIpStatus(selected.status, t)}</div>
-            <div>{t.table.mac}: <span className="font-mono">{selected.macs.join(", ") || "-"}</span></div>
-            <div>{t.table.sources}: {selected.sources.join(", ") || "-"}</div>
-            <Button type="button" size="sm" onClick={() => setDetailsOpen(true)}>
-              Open selected IP / MAC detail
-            </Button>
-          </div>
-        ) : null}
         {selected ? (
           <AuditModal
             open={detailsOpen}
@@ -1029,18 +1258,23 @@ function Devices({ result, t }: { result: AnalysisResult; t: Copy }) {
   );
 }
 
-function Vlans({ result, t }: { result: AnalysisResult; t: Copy }) {
+function Vlans({ result, t, language }: { result: AnalysisResult; t: Copy; language: Language }) {
   const [selectedKey, setSelectedKey] = useState(result.interfaces[0] ? interfaceKey(result.interfaces[0]) : "");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const interfacePage = useRecordPage(result.interfaces);
   const selected = result.interfaces.find(row => interfaceKey(row) === selectedKey) ?? result.interfaces[0];
   return (
     <Card>
       <CardHeader><CardTitle>{t.tabs.vlans}</CardTitle><CardDescription>{t.panels.vlans}</CardDescription></CardHeader>
       <CardContent>
         <DataTable headers={[t.table.interface, t.table.status, t.table.vlan, t.table.mode, t.table.ip]}>
-          {result.interfaces.map(row => (
+          {interfacePage.items.map(row => (
             <TableRow
               key={interfaceKey(row)}
-              onClick={() => setSelectedKey(interfaceKey(row))}
+              onClick={() => {
+                setSelectedKey(interfaceKey(row));
+                setDetailsOpen(true);
+              }}
               className={cn("cursor-pointer", selected && interfaceKey(selected) === interfaceKey(row) && "bg-cyan-400/10")}
             >
               <TableCell className="font-mono">{row.name}</TableCell>
@@ -1051,19 +1285,36 @@ function Vlans({ result, t }: { result: AnalysisResult; t: Copy }) {
             </TableRow>
           ))}
         </DataTable>
+        <RecordPager page={interfacePage.page} pageCount={interfacePage.pageCount} total={result.interfaces.length} onPageChange={interfacePage.setPage} />
         {selected ? (
-          <DetailBlock
-            title={`${detailLabel(t)}: ${selected.name}`}
-            lines={[
-              `${t.table.status}: ${selected.status ?? "-"}`,
-              `${t.table.vlan}: ${selected.vlan ?? "-"}`,
-              `${t.table.mode}: ${selected.mode ?? "-"}`,
-              `${t.table.ip}: ${selected.ip ?? "-"}/${selected.prefix ?? "-"}`,
-              `Description: ${selected.description ?? "-"}`,
-              "",
-              ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
-            ]}
-          />
+          <AuditModal
+            open={detailsOpen}
+            onClose={() => setDetailsOpen(false)}
+            title={`${language === "th" ? "รายละเอียด Interface" : "Interface detail"}: ${selected.name}`}
+            subtitle={`${selected.evidence[0]?.device ?? "-"} · ${selected.vrf ?? "global"}`}
+          >
+            <div className="space-y-4 text-sm">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <DetailMetric label={t.table.status} value={selected.status ?? "-"} />
+                <DetailMetric label={t.table.vlan} value={selected.vlan ?? "-"} />
+                <DetailMetric label={t.table.mode} value={selected.mode ?? "-"} />
+              </div>
+              <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3 text-sm">
+                <dl className="grid grid-cols-[130px_minmax(0,1fr)] gap-x-3 gap-y-2">
+                  <dt className="text-muted-foreground">IP</dt><dd className="font-mono">{selected.ip ? `${selected.ip}/${selected.prefix ?? "?"}` : "-"}</dd>
+                  <dt className="text-muted-foreground">{language === "th" ? "คำอธิบาย" : "Description"}</dt><dd>{selected.description ?? "-"}</dd>
+                  <dt className="text-muted-foreground">{language === "th" ? "ที่มาคำอธิบาย" : "Description source"}</dt><dd>{selected.descriptionSource ?? "Unknown"}{selected.descriptionConfidence !== undefined ? ` · ${selected.descriptionConfidence}%` : ""}</dd>
+                  <dt className="text-muted-foreground">Port-channel</dt><dd>{selected.channelGroup ? `${selected.channelGroup} (${selected.channelMode ?? "-"})` : "-"}</dd>
+                  <dt className="text-muted-foreground">DHCP</dt><dd>{selected.dhcpSnoopingTrust ? "Trusted" : "-"}</dd>
+                </dl>
+              </div>
+              <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+                <div className="text-sm font-medium">{t.table.evidence}</div>
+                <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.evidence.map(line => `${line.device}:${line.line} [${line.command}] ${line.text}`).join("\n") || t.states.noEvidence}</pre>
+              </div>
+              <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.table.sources}:</span>{" "}{[...new Set(selected.evidence.map(line => line.command))].join(", ") || "-"}</div>
+            </div>
+          </AuditModal>
         ) : null}
       </CardContent>
     </Card>
@@ -1071,12 +1322,19 @@ function Vlans({ result, t }: { result: AnalysisResult; t: Copy }) {
 }
 
 function Findings({ title, findings, t, language }: { title: string; findings: Finding[]; t: Copy; language: Language }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = findings.find(finding => finding.id === selectedId);
   return (
     <Card>
       <CardHeader><CardTitle>{title}</CardTitle><CardDescription>{findings.length} {t.panels.findings}</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         {findings.length ? findings.map(finding => (
-          <div key={finding.id} className="cyber-finding rounded-lg border p-4">
+          <button
+            key={finding.id}
+            type="button"
+            onClick={() => setSelectedId(finding.id)}
+            className="cyber-finding w-full rounded-lg border p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+          >
             <div className="flex flex-wrap items-center gap-2">
               <Badge severity={finding.severity}>{translateSeverity(finding.severity, t)}</Badge>
               <div className="font-medium">{translateFindingTitle(finding.title, language)}</div>
@@ -1084,20 +1342,143 @@ function Findings({ title, findings, t, language }: { title: string; findings: F
               <div className="ms-auto text-xs text-muted-foreground">{t.table.confidence} {finding.confidence}%</div>
             </div>
             <p className="mt-2 text-sm text-muted-foreground">{localizeFindingDescription(finding, language)}</p>
-            <p className="mt-2 text-sm">{localizeRecommendation(finding, language)}</p>
-            <div className="mt-3 grid gap-2 lg:grid-cols-2">
-              <pre className="overflow-auto rounded-md bg-muted p-3 text-xs">{finding.verificationCommands.join("\n")}</pre>
-              <pre className="overflow-auto rounded-md bg-muted p-3 text-xs">{finding.evidence.slice(0, 4).map(e => `${e.device}:${e.line} ${e.text}`).join("\n") || t.states.noEvidence}</pre>
-            </div>
-          </div>
+          </button>
         )) : <EmptyPanel text={t.states.noFindings} />}
       </CardContent>
+      <AuditModal
+        open={Boolean(selected)}
+        onClose={() => setSelectedId(null)}
+        title={selected ? translateFindingTitle(selected.title, language) : ""}
+        subtitle={selected ? `${selected.target ?? t.states.noEvidence} · ${t.table.confidence} ${selected.confidence}%` : ""}
+      >
+        {selected ? (
+          <div className="space-y-4 text-sm">
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="flex flex-wrap items-center gap-2"><Badge severity={selected.severity}>{translateSeverity(selected.severity, t)}</Badge><span className="font-mono text-xs text-muted-foreground">{selected.target ?? "-"}</span></div>
+              <p className="mt-3 leading-6 text-muted-foreground">{localizeFindingDescription(selected, language)}</p>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{t.table.recommendation}</div>
+              <p className="mt-2 leading-6">{localizeRecommendation(selected, language)}</p>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">Verification commands</div>
+              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.verificationCommands.join("\n") || "-"}</pre>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{t.table.evidence}</div>
+              <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.evidence.map(e => `${e.device}:${e.line} [${e.command}] ${e.text}`).join("\n") || t.states.noEvidence}</pre>
+            </div>
+            <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75">
+              <span className="font-medium text-cyan-50">Sources checked:</span>{" "}{[...new Set(selected.evidence.map(e => e.command))].join(", ") || "-"}
+            </div>
+          </div>
+        ) : null}
+      </AuditModal>
+    </Card>
+  );
+}
+
+function Configuration({ result, t, language }: { result: AnalysisResult; t: Copy; language: Language }) {
+  const features = useMemo(() => {
+    const grouped = new Map<string, {
+      key: string;
+      category: string;
+      feature: string;
+      scopeLabel: string;
+      description?: string;
+      values: string[];
+      evidence: AnalysisResult["configFeatures"][number]["evidence"];
+    }>();
+    for (const item of result.configFeatures) {
+      const scope = scopeFromEvidence(item.evidence);
+      const scopeLabel = `${scope.deviceId} · ${scope.vrf ?? "global"}`;
+      const key = `${scopeKey(scope)}|${item.scope ?? "global"}|${item.category}|${item.feature}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.values.push(item.value ?? "-");
+        existing.evidence.push(...item.evidence);
+        continue;
+      }
+      grouped.set(key, {
+        key,
+        category: item.category,
+        feature: item.feature,
+        scopeLabel,
+        description: item.description,
+        values: [item.value ?? "-"],
+        evidence: [...item.evidence]
+      });
+    }
+    return [...grouped.values()].sort((left, right) => left.category.localeCompare(right.category) || left.feature.localeCompare(right.feature));
+  }, [result.configFeatures]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selected = features.find(feature => feature.key === selectedKey);
+  const byCategory = features.reduce<Record<string, typeof features>>((groups, feature) => {
+    (groups[feature.category] ??= []).push(feature);
+    return groups;
+  }, {});
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t.tabs.configuration}</CardTitle>
+        <CardDescription>{language === "th" ? "หัวข้อ Config ที่ตรวจพบจาก CLI รอบปัจจุบัน เลือกหัวข้อเพื่อดูคำอธิบายและหลักฐานเฉพาะที่เกี่ยวข้อง" : "Configuration features found in the current CLI. Select a feature to inspect its explanation and only its related evidence."}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {features.length ? Object.entries(byCategory).map(([category, categoryFeatures]) => (
+          <section key={category} aria-label={category}>
+            <h2 className="mb-2 text-sm font-semibold text-cyan-100">{category}</h2>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {categoryFeatures.map(feature => (
+                <button
+                  key={feature.key}
+                  type="button"
+                  onClick={() => setSelectedKey(feature.key)}
+                  className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3 text-left hover:bg-cyan-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+                >
+                  <div className="flex items-start justify-between gap-2"><span className="text-sm font-medium">{localizeConfigFeature(feature.feature, language)}</span><Badge severity="Info">{feature.evidence.length}</Badge></div>
+                  <div className="mt-1 font-mono text-[11px] text-cyan-100/65">{feature.scopeLabel}</div>
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{localizeConfigDescription(feature.description, language)}</p>
+                </button>
+              ))}
+            </div>
+          </section>
+        )) : <EmptyPanel text={t.states.noEvidence} />}
+      </CardContent>
+      <AuditModal
+        open={Boolean(selected)}
+        onClose={() => setSelectedKey(null)}
+        title={selected ? localizeConfigFeature(selected.feature, language) : ""}
+        subtitle={selected ? `${selected.category} · ${selected.scopeLabel}` : undefined}
+      >
+        {selected ? (
+          <div className="space-y-4 text-sm">
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{language === "th" ? "คำอธิบาย" : "Description"}</div>
+              <p className="mt-2 leading-6 text-muted-foreground">{localizeConfigDescription(selected.description, language)}</p>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{language === "th" ? "ค่าที่ตรวจพบ" : "Detected values"}</div>
+              <ul className="mt-2 space-y-1 text-xs leading-5 text-cyan-50/80">
+                {[...new Set(selected.values)].map(value => <li key={value}>- {value}</li>)}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+              <div className="text-sm font-medium">{t.table.evidence}</div>
+              <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.evidence.map(item => `${item.device}:${item.line} [${item.command}] ${item.text}`).join("\n") || t.states.noEvidence}</pre>
+            </div>
+            <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.table.sources}:</span>{" "}{[...new Set(selected.evidence.map(item => item.command))].join(", ") || "-"}</div>
+          </div>
+        ) : null}
+      </AuditModal>
     </Card>
   );
 }
 
 function Security({ result, t }: { result: AnalysisResult; t: Copy }) {
   const [selectedId, setSelectedId] = useState(result.securityChecks[0]?.id ?? "");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const selected = result.securityChecks.find(check => check.id === selectedId) ?? result.securityChecks[0];
   return (
     <div className="space-y-4">
@@ -1105,14 +1486,18 @@ function Security({ result, t }: { result: AnalysisResult; t: Copy }) {
       <Card>
         <CardHeader><CardTitle>{t.tabs.security}</CardTitle><CardDescription>{t.panels.securityChecks}</CardDescription></CardHeader>
         <CardContent>
-          <DataTable headers={[t.table.check, t.table.status, t.table.severity, t.table.evidence, t.table.recommendation]}>
+          <DataTable headers={[t.table.check, t.table.sources, t.table.status, t.table.severity, t.table.evidence, t.table.recommendation]}>
             {result.securityChecks.map((check: SecurityCheck) => (
               <TableRow
                 key={check.id}
-                onClick={() => setSelectedId(check.id)}
+                onClick={() => {
+                  setSelectedId(check.id);
+                  setDetailsOpen(true);
+                }}
                 className={cn("cursor-pointer", selected?.id === check.id && "bg-cyan-400/10")}
               >
                 <TableCell>{translateSecurityCheck(check.name, isThaiCopy(t) ? "th" : "en")}</TableCell>
+                <TableCell className="font-mono text-xs">{check.evidence[0]?.device ?? "-"}</TableCell>
                 <TableCell><Badge severity={check.status === "Passed" ? "Passed" : check.severity}>{translateCheckStatus(check.status, t)}</Badge></TableCell>
                 <TableCell>{translateSeverity(check.severity, t)}</TableCell>
                 <TableCell>{check.evidence.length}</TableCell>
@@ -1121,16 +1506,21 @@ function Security({ result, t }: { result: AnalysisResult; t: Copy }) {
             ))}
           </DataTable>
           {selected ? (
-            <DetailBlock
+            <AuditModal
+              open={detailsOpen}
+              onClose={() => setDetailsOpen(false)}
               title={`${detailLabel(t)}: ${translateSecurityCheck(selected.name, isThaiCopy(t) ? "th" : "en")}`}
-              lines={[
-                `${t.table.status}: ${translateCheckStatus(selected.status, t)}`,
-                `${t.table.severity}: ${translateSeverity(selected.severity, t)}`,
-                `${t.table.recommendation}: ${translateFindingDescription(selected.recommendation, isThaiCopy(t) ? "th" : "en")}`,
-                "",
-                ...selected.evidence.slice(0, 80).map(line => `${line.device}:${line.line} ${line.text}`)
-              ]}
-            />
+              subtitle={selected.evidence[0]?.device ?? "-"}
+            >
+              <div className="space-y-4 text-sm">
+                <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3">
+                  <div className="flex flex-wrap items-center gap-2"><Badge severity={selected.status === "Passed" ? "Passed" : selected.severity}>{translateCheckStatus(selected.status, t)}</Badge><span>{translateSeverity(selected.severity, t)}</span></div>
+                  <p className="mt-3 leading-6">{translateFindingDescription(selected.recommendation, isThaiCopy(t) ? "th" : "en")}</p>
+                </div>
+                <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 p-3"><div className="text-sm font-medium">{t.table.evidence}</div><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-black/25 p-3 text-xs">{selected.evidence.map(line => `${line.device}:${line.line} [${line.command}] ${line.text}`).join("\n") || t.states.noEvidence}</pre></div>
+                <div className="border-t border-cyan-400/15 pt-3 text-xs text-cyan-100/75"><span className="font-medium text-cyan-50">{t.table.sources}:</span>{" "}{[...new Set(selected.evidence.map(line => line.command))].join(", ") || "-"}</div>
+              </div>
+            </AuditModal>
           ) : null}
         </CardContent>
       </Card>
@@ -1176,13 +1566,16 @@ function Topology({ result, t }: { result: AnalysisResult; t: Copy }) {
 
 function Troubleshooting({ result, t }: { result: AnalysisResult; t: Copy }) {
   return (
-    <Card>
+    <div className="space-y-4">
+      <CollectionProfilePanel result={result} language={isThaiCopy(t) ? "th" : "en"} />
+      <Card>
       <CardHeader><CardTitle>{t.tabs.troubleshooting}</CardTitle><CardDescription>{t.panels.troubleshooting}</CardDescription></CardHeader>
       <CardContent>
         <pre className="overflow-auto rounded-md bg-muted p-4 text-sm">{result.recommendedCommands.join("\n") || t.states.noCommands}</pre>
         <Button className="mt-3" variant="outline" onClick={() => navigator.clipboard.writeText(result.recommendedCommands.join("\n"))}>{t.actions.copyCommands}</Button>
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 }
 
@@ -1227,16 +1620,24 @@ function Settings({ t }: { t: Copy }) {
   );
 }
 
+function dhcpPoolKey(pool: AnalysisResult["dhcpPools"][number]): string {
+  const scope = scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf }));
+  return `${scope}|${pool.name}|${pool.host ?? pool.network ?? "-"}`;
+}
+
 function poolStats(result: AnalysisResult, pool: AnalysisResult["dhcpPools"][number]) {
+  const poolScope = scopeKey(scopeFromEvidence(pool.evidence, { vrf: pool.vrf }));
+  const inScope = (evidence: AnalysisResult["dhcpPools"][number]["evidence"], vrf?: string) => scopeKey(scopeFromEvidence(evidence, { vrf })) === poolScope;
   const inPool = (ip: string) => Boolean(pool.network && pool.prefix !== undefined && ipInSubnet(ip, pool.network, pool.prefix));
-  const excludedRanges = result.dhcpExcludedRanges.filter(range => inPool(range.startIp) || inPool(range.endIp));
+  const excludedRanges = result.dhcpExcludedRanges.filter(range => inScope(range.evidence, range.vrf) && (inPool(range.startIp) || inPool(range.endIp)));
   const excluded = excludedRanges.reduce((total, range) => total + ipRangeCount(range.startIp, range.endIp), 0);
-  const reservations = result.dhcpPools.filter(item => item.host && inPool(item.host));
-  const conflictRows = result.dhcpConflicts.filter(item => inPool(item.ip));
-  const leased = pool.leased ?? result.dhcpBindings.filter(item => inPool(item.ip)).length;
+  const reservations = result.dhcpPools.filter(item => inScope(item.evidence, item.vrf) && item.host && inPool(item.host));
+  const conflictRows = result.dhcpConflicts.filter(item => inScope(item.evidence, item.vrf) && inPool(item.ip));
+  const bindingRows = result.dhcpBindings.filter(item => inScope(item.evidence, item.vrf) && inPool(item.ip));
+  const leased = pool.leased ?? bindingRows.length;
   const total = pool.total ?? 0;
   const poolFree = Math.max(0, total - leased - excluded - reservations.length - conflictRows.length);
-  return { leased, total, poolFree, excluded, reserved: reservations.length, conflicts: conflictRows.length, excludedRanges, conflictRows, reservationsRows: reservations };
+  return { leased, total, poolFree, excluded, reserved: reservations.length, conflicts: conflictRows.length, excludedRanges, conflictRows, reservationsRows: reservations, bindingRows };
 }
 
 function ipRangeCount(startIp: string, endIp: string) {
@@ -1250,7 +1651,7 @@ function DataTable({ headers, children }: { headers: string[]; children: React.R
   const rows = Children.toArray(children);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<{ column: number; direction: "asc" | "desc" } | null>(null);
-  const pageSize = 100;
+  const pageSize = 50;
   const [page, setPage] = useState(0);
   const filteredRows = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -1316,11 +1717,38 @@ function DataTable({ headers, children }: { headers: string[]; children: React.R
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>Showing {currentPage * pageSize + 1}-{Math.min(sortedRows.length, (currentPage + 1) * pageSize)} of {sortedRows.length}</span>
           <div className="flex gap-2">
-            <Button type="button" size="sm" variant="outline" disabled={currentPage === 0} onClick={() => setPage(value => Math.max(0, value - 1))}>Prev</Button>
-            <Button type="button" size="sm" variant="outline" disabled={currentPage >= pageCount - 1} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}>Next</Button>
+            <Button type="button" size="icon" variant="outline" title="Previous page" aria-label="Previous page" disabled={currentPage === 0} onClick={() => setPage(value => Math.max(0, value - 1))}><ChevronLeft className="h-4 w-4" /></Button>
+            <Button type="button" size="icon" variant="outline" title="Next page" aria-label="Next page" disabled={currentPage >= pageCount - 1} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}><ChevronRight className="h-4 w-4" /></Button>
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function useRecordPage<T>(records: T[], pageSize = 50) {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(records.length / pageSize));
+  const currentPage = Math.min(page, pageCount - 1);
+  return {
+    items: records.slice(currentPage * pageSize, currentPage * pageSize + pageSize),
+    page: currentPage,
+    pageCount,
+    setPage,
+  };
+}
+
+function RecordPager({ page, pageCount, total, onPageChange }: { page: number; pageCount: number; total: number; onPageChange: (page: number) => void }) {
+  if (pageCount <= 1) return null;
+  const start = page * 50 + 1;
+  const end = Math.min(total, (page + 1) * 50);
+  return (
+    <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+      <span>{start}-{end} / {total}</span>
+      <div className="flex gap-2">
+        <Button type="button" size="icon" variant="outline" title="Previous page" aria-label="Previous page" disabled={page === 0} onClick={() => onPageChange(page - 1)}><ChevronLeft className="h-4 w-4" /></Button>
+        <Button type="button" size="icon" variant="outline" title="Next page" aria-label="Next page" disabled={page >= pageCount - 1} onClick={() => onPageChange(page + 1)}><ChevronRight className="h-4 w-4" /></Button>
+      </div>
     </div>
   );
 }
@@ -1362,10 +1790,11 @@ function detailLabel(t: Copy) {
 }
 
 function commandStatusLabel(block: { parseStatus?: string; parsed: boolean; warning?: string }, t: Copy) {
-  if (block.parseStatus === "parsed") return t.states.parsed;
+  if (block.parseStatus === "fully-parsed") return t.states.parsed;
   if (block.parseStatus === "partially-parsed") return isThaiCopy(t) ? "อ่านได้บางส่วน" : "Partially Parsed";
   if (block.parseStatus === "unsupported") return isThaiCopy(t) ? "ยังไม่รองรับ Parser" : "Unsupported Parser";
   if (block.parseStatus === "malformed") return isThaiCopy(t) ? "รูปแบบข้อมูลผิดปกติ" : "Malformed";
+  if (block.parseStatus === "ambiguous-format") return isThaiCopy(t) ? "รูปแบบข้อมูลกำกวม" : "Ambiguous Format";
   if (block.parseStatus === "empty") return isThaiCopy(t) ? "ไม่มีข้อมูลในคำสั่ง" : "Empty";
   return block.parsed ? t.states.parsed : (block.warning ?? "-");
 }
@@ -1410,15 +1839,6 @@ function MetricCard({
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <Card>
-      <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
-  );
-}
-
 function EmptyState({ t, onOpenImport }: { t: Copy; onOpenImport: () => void }) {
   return (
     <Card>
@@ -1456,21 +1876,24 @@ function FilePicker({ label, onText }: { label: string; onText: (text: string) =
   );
 }
 
-function filterInventory(rows: IpInventoryRecord[], query: string) {
-  if (!query.trim()) return rows;
-  const q = query.toLowerCase();
-  return rows.filter(row => [
+function ipSearchText(row: IpInventoryRecord) {
+  return [
+    row.deviceId,
+    row.vrf,
     row.ip,
     row.status,
     row.statusReason ?? "",
+    row.description ?? "",
+    row.descriptionSource ?? "",
     ...row.macs,
     ...row.ports,
     ...row.sources,
     ...(row.checkedSources ?? []),
     ...(row.missingSources ?? []),
     ...(row.relatedPoolNames ?? []),
-    ...row.vlans.map(String)
-  ].join(" ").toLowerCase().includes(q));
+    ...row.vlans.map(String),
+    ...row.evidence.map(item => item.text)
+  ].join(" ");
 }
 
 async function runAnalysis(text: string): Promise<AnalysisResult> {
@@ -1663,6 +2086,48 @@ function localizeRecommendation(finding: Finding, language: Language) {
     return "เพิ่ม Parser สำหรับคำสั่งนี้ หรือเก็บคำสั่งมาตรฐานที่ระบบรองรับเพื่อให้วิเคราะห์ได้ละเอียดขึ้น";
   }
   return translateFindingDescription(finding.recommendation, language);
+}
+
+function localizeConfigFeature(feature: string, language: Language): string {
+  if (language === "en") return feature;
+  const labels: Record<string, string> = {
+    "AAA": "AAA / การยืนยันตัวตน",
+    "DHCP Snooping": "DHCP Snooping",
+    "Dynamic ARP Inspection": "Dynamic ARP Inspection",
+    "Spanning Tree": "Spanning Tree",
+    "SNMP": "SNMP",
+    "Logging": "Syslog / Logging",
+    "NTP": "NTP / เวลาเครือข่าย",
+    "VRF": "VRF",
+    "NAT": "NAT",
+    "Flow and Performance Monitoring": "NetFlow / การติดตามประสิทธิภาพ",
+    "OMP": "SD-WAN OMP",
+    "First-Hop Redundancy": "Gateway Redundancy",
+    "Access List": "Access List",
+    "Static Route": "Static Route"
+  };
+  return labels[feature] ?? feature;
+}
+
+function localizeConfigDescription(description: string | undefined, language: Language): string {
+  if (!description || language === "en") return description ?? "-";
+  const descriptions: Record<string, string> = {
+    "Authentication, authorization, and accounting settings were detected. Review the configured TACACS+/RADIUS path and local fallback policy.": "ตรวจพบการตั้งค่า Authentication, Authorization และ Accounting ควรตรวจเส้นทาง TACACS+/RADIUS และนโยบาย fallback แบบ local.",
+    "DHCP Snooping is configured. Inspect its enabled VLANs and trusted uplink ports before relying on binding evidence.": "ตั้งค่า DHCP Snooping แล้ว ควรตรวจ VLAN ที่เปิดใช้และ uplink ที่เชื่อถือได้ก่อนใช้ binding เป็นหลักฐาน.",
+    "Dynamic ARP Inspection is configured. Validate that the protected VLANs and trusted ports match the intended Layer 2 design.": "ตั้งค่า Dynamic ARP Inspection แล้ว ควรตรวจว่า VLAN ที่ป้องกันและพอร์ต trusted ตรงกับแบบ Layer 2 ที่ตั้งใจไว้.",
+    "Spanning Tree settings were detected. Confirm root placement, PortFast use, and any blocked or inconsistent ports with operational output.": "ตรวจพบการตั้งค่า Spanning Tree ควรยืนยันตำแหน่ง root, การใช้ PortFast และพอร์ต blocked/inconsistent ด้วยข้อมูล operational.",
+    "SNMP management settings were detected. Sensitive credentials are masked; review version, access restrictions, trap hosts, and read/write exposure.": "ตรวจพบการตั้งค่า SNMP โดยค่าลับถูกปิดบัง ควรตรวจเวอร์ชัน ข้อจำกัดการเข้าถึง trap host และสิทธิ์ read/write.",
+    "Syslog configuration was detected. Verify the source interface, destination reachability, and retention policy.": "ตรวจพบการตั้งค่า Syslog ควรตรวจ source interface การเข้าถึงปลายทาง และนโยบายเก็บรักษา log.",
+    "Time synchronization configuration was detected. Verify source interface, VRF, preferred server, and synchronization state.": "ตรวจพบการตั้งค่าเวลา ควรตรวจ source interface, VRF, preferred server และสถานะการ sync.",
+    "A VRF definition was detected. IP, route, and DHCP evidence must be correlated only within this VRF.": "ตรวจพบ VRF ต้องเชื่อมโยงหลักฐาน IP, route และ DHCP ภายใน VRF เดียวกันเท่านั้น.",
+    "NAT configuration was detected. Review inside/outside roles, overload rules, and the associated access list before troubleshooting address translation.": "ตรวจพบ NAT ควรตรวจบทบาท inside/outside, กฎ overload และ access list ที่เกี่ยวข้องก่อนวิเคราะห์การแปลงที่อยู่.",
+    "Flow or performance monitoring is configured. Verify exporter reachability, monitor attachment, and collector policy.": "ตั้งค่า Flow หรือ monitoring แล้ว ควรตรวจการเข้าถึง exporter, จุดที่ผูก monitor และนโยบาย collector.",
+    "SD-WAN OMP configuration was detected. Review transport, control-plane, and route exchange state with read-only operational commands.": "ตรวจพบ SD-WAN OMP ควรตรวจ transport, control-plane และการแลก route ด้วยคำสั่งตรวจสอบแบบ read-only.",
+    "First-hop redundancy configuration was detected. Validate active/standby or master/backup state and virtual gateway addresses.": "ตรวจพบ gateway redundancy ควรยืนยันสถานะ active/standby หรือ master/backup และ virtual gateway address.",
+    "An access-list entry was detected. Review its order, direction, and effective interface attachment before concluding traffic is permitted or denied.": "ตรวจพบ access-list ควรตรวจลำดับ ทิศทาง และ interface ที่นำไปใช้จริง ก่อนสรุปว่า traffic ถูกอนุญาตหรือปฏิเสธ.",
+    "A static route was detected. Verify the next hop, VRF, outgoing interface, and route availability with operational routing output.": "ตรวจพบ static route ควรตรวจ next hop, VRF, outgoing interface และการใช้งาน route ด้วยข้อมูล routing operational."
+  };
+  return descriptions[description] ?? "ตรวจพบการตั้งค่าใน CLI ที่นำเข้า เลือกดูหลักฐานเพื่อยืนยันขอบเขตและผลกระทบ.";
 }
 
 function localizedTelegramSummary(result: AnalysisResult, t: Copy) {
