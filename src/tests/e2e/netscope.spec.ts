@@ -131,3 +131,20 @@ test("opens only the selected config feature and finding in detail dialogs", asy
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByText("Sources checked:")).toBeVisible();
 });
+
+test("opens a selected incident with only its related log evidence", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("select[aria-label]").first().selectOption("en");
+  await page.getByRole("button", { name: "Load Demo" }).click();
+  await page.getByRole("button", { name: "Analyze" }).click();
+  await page.getByRole("button", { name: "Conflicts", exact: true }).click();
+
+  const detail = page.locator("#analysis-detail");
+  await expect(detail.getByText("Incident timeline")).toBeVisible();
+  await detail.locator("button.cyber-finding").first().click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Related log evidence")).toBeVisible();
+  await expect(dialog.getByText("Read-only verification commands")).toBeVisible();
+  await expect(dialog.getByText("Sources checked:")).toBeVisible();
+});

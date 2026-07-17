@@ -193,11 +193,17 @@ export function makeEvidence(block: CommandBlock, line: Evidence): Evidence {
     text: line.text,
     sourceFile: line.sourceFile,
     normalizedText: line.normalizedText ?? line.text.trim(),
+    collectedAt: line.collectedAt,
+    deviceTimestamp: line.deviceTimestamp,
+    ageSeconds: line.ageSeconds,
+    freshness: line.freshness,
     scope: {
       deviceId: block.device,
       hostname: block.device,
       vendor: block.vendor,
-      sourceCommand: block.command
+      sourceCommand: block.command,
+      observedAt: line.deviceTimestamp,
+      sourceAgeSeconds: line.ageSeconds
     }
   };
 }

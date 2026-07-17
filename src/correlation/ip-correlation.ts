@@ -9,6 +9,7 @@ import type {
 import { calculateConfidence } from "@/evidence/confidence-engine";
 import { ipEntityKey, normalizeVrf, scopeFromEvidence, scopeKey, subnetEntityKey } from "@/evidence/evidence-scope";
 import { buildEntityGraph } from "@/entities/entity-graph";
+import { buildIncidents } from "@/correlation/incident-analysis";
 import { calculateSubnet, ipInSubnet, ipToNumber, numberToIp } from "@/utils/ip";
 
 export function correlate(dataset: ParsedDataset): AnalysisResult {
@@ -57,6 +58,7 @@ export function correlate(dataset: ParsedDataset): AnalysisResult {
       utilization: subnet.totalUsable ? Math.round((ipInventory.filter(item => item.status === "Used" && item.deviceId === subnet.deviceId && item.vrf === subnet.vrf && ipInSubnet(item.ip, subnet.network, subnet.prefix)).length / subnet.totalUsable) * 100) : 0
     })),
     findings: allFindings,
+    incidents: buildIncidents(dataset.logs),
     securityChecks,
     securityScore,
     blockedDevices,

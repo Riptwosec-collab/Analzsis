@@ -311,6 +311,8 @@ export interface LogRecord {
   severity: Severity;
   type: string;
   message: string;
+  /** Timestamp copied from the device log when the source includes one. */
+  deviceTimestamp?: string;
   ip?: string;
   mac?: string;
   vlan?: number;
@@ -359,6 +361,25 @@ export interface IpInventoryRecord extends DescriptionMetadata {
   confidenceBreakdown: ConfidenceBreakdown;
   contradictions: string[];
   evidence: Evidence[];
+}
+
+export interface IncidentRecord {
+  id: string;
+  type: string;
+  severity: Severity;
+  device: string;
+  interfaceName?: string;
+  ip?: string;
+  mac?: string;
+  vlan?: number;
+  startTimestamp?: string;
+  endTimestamp?: string;
+  durationSeconds?: number;
+  confidence: number;
+  eventCount: number;
+  events: LogRecord[];
+  evidence: Evidence[];
+  verificationCommands: string[];
 }
 
 export interface SubnetRecord extends DescriptionMetadata {
@@ -446,6 +467,7 @@ export interface AnalysisResult extends ParsedDataset {
   freeIps: IpInventoryRecord[];
   subnets: SubnetRecord[];
   findings: Finding[];
+  incidents: IncidentRecord[];
   securityChecks: SecurityCheck[];
   securityScore: number;
   evidenceCoverage?: number;

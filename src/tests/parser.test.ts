@@ -518,4 +518,19 @@ describe("analysis", () => {
     expect(row?.confidenceBreakdown.contradictionPenalty).toBeGreaterThan(0);
     expect(row?.confidenceBreakdown.finalScore).toBe(row?.confidence);
   });
+
+  it("preserves dated log timestamps and groups only related log events into an incident", () => {
+    const result = analyzeCli([
+      "CORE-SW01#show logging",
+      "2026-07-17T10:00:00Z %SW_MATM-4-MACFLAP_NOTIF: Host 0011.2233.4455 in vlan 20 is flapping between port Gi1/0/5 and port Gi1/0/6",
+      "2026-07-17T10:00:45Z %SW_MATM-4-MACFLAP_NOTIF: Host 0011.2233.4455 in vlan 20 is flapping between port Gi1/0/5 and port Gi1/0/7"
+    ].join("\n"));
+
+    expect(result.logs).toHaveLength(2);
+    expect(result.logs[0]?.deviceTimestamp).toBe("2026-07-17T10:00:00Z");
+    expect(result.logs[0]?.evidence[0]?.ageSeconds).toBeTypeOf("number");
+    expect(result.incidents).toHaveLength(1);
+    expect(result.incidents[0]).toMatchObject({ type: "MAC_FLAPPING", eventCount: 2, durationSeconds: 45, mac: "00:11:22:33:44:55" });
+    expect(result.incidents[0]?.verificationCommands).toContain("show mac address-table dynamic");
+  });
 });

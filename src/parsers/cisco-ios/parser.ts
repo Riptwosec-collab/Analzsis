@@ -5,6 +5,7 @@ import type {
   DhcpBindingRecord,
   DhcpConflictRecord,
   DhcpPoolRecord,
+  Evidence,
   InterfaceRecord,
   LogRecord,
   MacRecord,
@@ -507,6 +508,7 @@ function parseLogs(block: CommandBlock): LogRecord[] {
 
 function logFromLine(block: CommandBlock, line: { text: string; line: number }): LogRecord {
   const text = line.text;
+  const timestamp = parseLogTimestamp(text);
   const mac = normalizeMac(text.match(/([0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}|[0-9a-f:-]{17})/i)?.[1]);
   const ip = text.match(/\b(\d+\.\d+\.\d+\.\d+)\b/)?.[1];
   const vlan = parseVlanId(text.match(/\bvlan\s+(\d+)/i)?.[1]);
@@ -516,12 +518,27 @@ function logFromLine(block: CommandBlock, line: { text: string; line: number }):
     severity: type === "MAC_FLAPPING" || type === "DENY_BLOCK" ? "High" : "Medium",
     type,
     message: text.trim(),
+    deviceTimestamp: timestamp.deviceTimestamp,
     ip,
     mac: mac ?? undefined,
     vlan,
     interfaceName: iface,
-    evidence: [makeEvidence(block, { ...line, device: block.device, command: block.command })]
+    evidence: [makeEvidence(block, { ...line, device: block.device, command: block.command, ...timestamp })]
   };
+}
+
+function parseLogTimestamp(text: string): Pick<Evidence, "deviceTimestamp" | "ageSeconds" | "freshness"> {
+  const isoMatch = text.match(/\b(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\b/);
+  if (isoMatch) {
+    const parsed = Date.parse(isoMatch[1].replace(" ", "T"));
+    if (!Number.isNaN(parsed)) {
+      const ageSeconds = Math.max(0, Math.floor((Date.now() - parsed) / 1000));
+      return { deviceTimestamp: isoMatch[1], ageSeconds, freshness: ageSeconds <= 900 ? "Fresh" : ageSeconds <= 3600 ? "Acceptable" : "Stale" };
+    }
+  }
+
+  const ciscoMatch = text.match(/^\*?([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?):/);
+  return ciscoMatch ? { deviceTimestamp: ciscoMatch[1], freshness: "Unknown" } : { freshness: "Unknown" };
 }
 
 function parseTopology(block: CommandBlock): TopologyLink[] {

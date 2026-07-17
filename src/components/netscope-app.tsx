@@ -38,6 +38,7 @@ import { ipInSubnet, ipToNumber } from "@/utils/ip";
 import { AuditModal } from "@/components/audit-modal";
 import { SanitizationDialog } from "@/components/sanitization-dialog";
 import { CollectionProfilePanel } from "@/features/troubleshooting/collection-profile-panel";
+import { IncidentTimeline } from "@/features/incidents/incident-timeline";
 import { IpMacCheckDetails } from "@/components/ip-mac-check-details";
 import { SubnetCheckDetails } from "@/components/subnet-check-details";
 import { Badge } from "@/components/ui/badge";
@@ -566,7 +567,7 @@ function ViewRouter({
     case "vlans":
       return <Vlans result={result} t={t} language={language} />;
     case "conflicts":
-      return <Findings title={t.tabs.conflicts} findings={result.findings.filter(f => f.category !== "Security")} t={t} language={language} />;
+      return <ConflictsView result={result} t={t} language={language} />;
     case "security":
       return <Security result={result} t={t} />;
     case "blocked-devices":
@@ -584,6 +585,15 @@ function ViewRouter({
     default:
       return <Overview result={result} t={t} onOpenView={onOpenView} />;
   }
+}
+
+function ConflictsView({ result, t, language }: { result: AnalysisResult; t: Copy; language: Language }) {
+  return (
+    <div className="space-y-4">
+      <IncidentTimeline incidents={result.incidents} labels={t.incidents} />
+      <Findings title={t.tabs.conflicts} findings={result.findings.filter(finding => finding.category !== "Security")} t={t} language={language} />
+    </div>
+  );
 }
 
 function ImportDetails({

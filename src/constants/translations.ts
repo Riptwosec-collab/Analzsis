@@ -136,6 +136,35 @@ export const translations = {
       missing: "Missing",
       collected: "Collected"
     },
+    incidents: {
+      title: "Incident timeline",
+      subtitle: "Only log events that share a device and affected target are grouped. Select one incident to inspect only its related evidence.",
+      records: "correlated incidents",
+      noRecords: "No log incidents were found in the current CLI input.",
+      events: "events",
+      affected: "Affected target",
+      start: "First observed",
+      end: "Last observed",
+      duration: "Observed duration",
+      durationUnavailable: "Unavailable without dated timestamps",
+      cause: "Event classification",
+      commands: "Read-only verification commands",
+      evidence: "Related log evidence",
+      sources: "Sources checked",
+      separator: " | ",
+      unavailable: "-",
+      vlan: "VLAN",
+      seconds: "s",
+      minutes: "m",
+      severity: { Critical: "Critical", High: "High", Medium: "Medium", Low: "Low", Info: "Info", Passed: "Passed" },
+      types: {
+        MAC_FLAPPING: "MAC movement / flapping",
+        DENY_BLOCK: "Traffic denied or blocked",
+        ERR_DISABLED: "Err-disabled interface",
+        PORT_SECURITY: "Port-security violation",
+        LOG_EVENT: "Network log event"
+      }
+    },
     audit: {
       title: "Verification Summary",
       subtitle: "Only checks supported by the current CLI are summarized. Details stay hidden until selected.",
@@ -332,6 +361,35 @@ export const translations = {
       state: "สถานะ",
       missing: "ยังไม่พบ",
       collected: "เก็บแล้ว"
+    },
+    incidents: {
+      title: "ลำดับเหตุการณ์ผิดปกติ",
+      subtitle: "รวมเฉพาะ log ที่มีอุปกรณ์และเป้าหมายได้รับผลกระทบเดียวกัน เลือกเหตุการณ์เพื่อดูเฉพาะหลักฐานที่เกี่ยวข้อง.",
+      records: "เหตุการณ์ที่เชื่อมโยงได้",
+      noRecords: "ไม่พบเหตุการณ์จาก log ใน CLI รอบนี้",
+      events: "เหตุการณ์ย่อย",
+      affected: "เป้าหมายที่ได้รับผลกระทบ",
+      start: "พบครั้งแรก",
+      end: "พบครั้งล่าสุด",
+      duration: "ระยะเวลาที่พบ",
+      durationUnavailable: "คำนวณไม่ได้เมื่อ log ไม่มีวันที่แบบสมบูรณ์",
+      cause: "ประเภทเหตุการณ์",
+      commands: "คำสั่งตรวจสอบแบบอ่านอย่างเดียว",
+      evidence: "หลักฐาน log ที่เกี่ยวข้อง",
+      sources: "แหล่งที่ตรวจสอบ",
+      separator: " | ",
+      unavailable: "-",
+      vlan: "VLAN",
+      seconds: "วินาที",
+      minutes: "นาที",
+      severity: { Critical: "วิกฤต", High: "สูง", Medium: "ปานกลาง", Low: "ต่ำ", Info: "ข้อมูล", Passed: "ผ่าน" },
+      types: {
+        MAC_FLAPPING: "MAC ย้ายพอร์ต / Flapping",
+        DENY_BLOCK: "ทราฟฟิกถูกปฏิเสธหรือบล็อก",
+        ERR_DISABLED: "พอร์ตอยู่ใน Err-disabled",
+        PORT_SECURITY: "ละเมิด Port Security",
+        LOG_EVENT: "เหตุการณ์จาก Network Log"
+      }
     },
     audit: {
       title: "สรุปการตรวจสอบ",
