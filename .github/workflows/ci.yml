@@ -2,51 +2,54 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'screenshots/**'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'screenshots/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 12
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           show-progress: false
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
       - name: Install dependencies
-        run: npm ci --silent
-
+        run: npm ci --silent --no-audit --no-fund
       - name: Typecheck
-        id: typecheck
-        continue-on-error: true
         run: npm run typecheck 2>&1 | tee typecheck.log
-
       - name: Lint
-        id: lint
-        continue-on-error: true
         run: npm run lint 2>&1 | tee lint.log
-
       - name: Unit tests
-        id: tests
-        continue-on-error: true
         run: npm test 2>&1 | tee test.log
-
       - name: Production build
-        id: build
-        continue-on-error: true
         run: npm run build 2>&1 | tee build.log
-
-      - name: Upload diagnostics
-        if: always()
+      - name: Upload diagnostics on failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: ci-diagnostics
@@ -55,13 +58,5 @@ jobs:
             lint.log
             test.log
             build.log
-          if-no-files-found: warn
-          retention-days: 3
-
-      - name: Fail on validation errors
-        if: always()
-        run: |
-          test "${{ steps.typecheck.outcome }}" = "success"
-          test "${{ steps.lint.outcome }}" = "success"
-          test "${{ steps.tests.outcome }}" = "success"
-          test "${{ steps.build.outcome }}" = "success"
+          if-no-files-found: ignore
+          retention-days: 1
