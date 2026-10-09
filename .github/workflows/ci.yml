@@ -1,10 +1,12 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
   pull_request:
+
+concurrency:
+  group: lean-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
